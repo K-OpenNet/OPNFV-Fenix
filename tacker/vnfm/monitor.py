@@ -83,3 +83,24 @@ class VNFMonitor(object):
         self._status_check_intvl = check_intvl
         LOG.debug('Spawning VNF monitor thread')
         threading.Thread(target=self.__run__).start()
+
+
+    def __run__(self):
+        while(1):
+            time.sleep(self._status_check_intvl)
+
+            with self._lock:
+                for hosting_vnf in VNFMonitor._hosting_vnfs.values():
+                    if hosting_vnf.get('dead', False) or (
+                            hosting_vnf['vnf']['status'] ==
+                            constants.PENDING_HEAL):
+                        LOG.debug(
+                            'monitor skips for DEAD/PENDING_HEAL vnf %s',
+                            hosting_vnf)
+                        continue
+                    try:
+                        self.run_monitor(hosting_vnf)
+                    except Exception as ex:
+                        LOG.exception("Unknown exception: Monitoring failed "
+                                      "for VNF '%s' due to '%s' ",
+                                      hosting_vnf['id'], ex)
