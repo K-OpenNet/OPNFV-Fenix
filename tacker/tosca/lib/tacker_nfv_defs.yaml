@@ -383,4 +383,8 @@ node_types:
       location:
         type: string
         required: true
-
+		requirements:
+      - virtualBinding:
+          node: tosca.nodes.nfv.VDU.Tacker
+      - virtualAttachment:
+          node: tosca.nodes.BlockStorage.Tacker
