@@ -147,3 +147,63 @@ class TOSCAToHOT(object):
                 else:
                     self._update_params(value, paramvalues, True)
 
+    @log.log
+    def _process_parameterized_input(self, dev_attrs, vnfd_dict):
+        param_vattrs_yaml = dev_attrs.pop('param_values', None)
+        if param_vattrs_yaml:
+            try:
+                param_vattrs_dict = yaml.safe_load(param_vattrs_yaml)
+                LOG.debug('param_vattrs_yaml', param_vattrs_dict)
+            except Exception as e:
+                LOG.debug("Not Well Formed: %s", str(e))
+                raise vnfm.ParamYAMLNotWellFormed(
+                    error_msg_details=str(e))
+            else:
+                self._update_params(vnfd_dict, param_vattrs_dict)
+        else:
+            raise cs.ParamYAMLInputMissing()
+
+    @log.log
+    def _process_vdu_network_interfaces(self, vdu_id, vdu_dict, properties,
+                                        template_dict):
+
+        networks_list = []
+        properties['networks'] = networks_list
+        for network_param in vdu_dict['network_interfaces'].values():
+            port = None
+            if 'addresses' in network_param:
+                ip_list = network_param.pop('addresses', [])
+                if not isinstance(ip_list, list):
+                    raise vnfm.IPAddrInvalidInput()
+                mgmt_flag = network_param.pop('management', False)
+                port, template_dict =\
+                    self._handle_port_creation(vdu_id, network_param,
+                                               template_dict,
+                                               ip_list, mgmt_flag)
+            if network_param.pop('management', False):
+                port, template_dict = self._handle_port_creation(vdu_id,
+                                                                 network_param,
+                                                                 template_dict,
+                                                                 [], True)
+            if port is not None:
+                network_param = {
+                    'port': {'get_resource': port}
+                }
+            networks_list.append(dict(network_param))
+        return vdu_dict, template_dict
+
+    @log.log
+    def _make_port_dict(self):
+        port_dict = {'type': 'OS::Neutron::Port'}
+        if self.unsupported_props:
+            port_dict['properties'] = {
+                'value_specs': {
+                    'port_security_enabled': False
+                }
+            }
+        else:
+            port_dict['properties'] = {
+                'port_security_enabled': False
+            }
+        port_dict['properties'].setdefault('fixed_ips', [])
+        return port_dict
