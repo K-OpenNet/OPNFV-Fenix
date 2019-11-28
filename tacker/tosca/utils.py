@@ -691,3 +691,59 @@ def post_process_template(template):
                     'reservation_metadata'))
 
 
+@log.log
+def get_mgmt_driver(template):
+    mgmt_driver = None
+    for nt in template.nodetemplates:
+        if nt.type_definition.is_derived_from(TACKERVDU):
+            if (mgmt_driver and nt.get_property_value('mgmt_driver') !=
+                    mgmt_driver):
+                raise vnfm.MultipleMGMTDriversSpecified()
+            else:
+                mgmt_driver = nt.get_property_value('mgmt_driver')
+
+    return mgmt_driver
+
+
+def findvdus(template):
+    vdus = []
+    for nt in template.nodetemplates:
+        if nt.type_definition.is_derived_from(TACKERVDU):
+            vdus.append(nt)
+    return vdus
+
+
+def get_maintenance_vdus(template):
+    maintenance_vdu_names = list()
+    vdus = findvdus(template)
+    for nt in vdus:
+        if nt.get_properties().get('maintenance'):
+            maintenance_vdu_names.append(nt.name)
+    return maintenance_vdu_names
+
+
+def get_flavor_dict(template, flavor_extra_input=None):
+    flavor_dict = {}
+    vdus = findvdus(template)
+    for nt in vdus:
+        flavor_tmp = nt.get_properties().get('flavor')
+        if flavor_tmp:
+            continue
+        if nt.get_capabilities().get("nfv_compute"):
+            flavor_dict[nt.name] = {}
+            properties = nt.get_capabilities()["nfv_compute"].get_properties()
+            for prop, (hot_prop, default, unit) in \
+                    (FLAVOR_PROPS).items():
+                hot_prop_val = (properties[prop].value
+                                if properties.get(prop, None) else None)
+                if unit and hot_prop_val:
+                    hot_prop_val = \
+                        utils.change_memory_unit(hot_prop_val, unit)
+                flavor_dict[nt.name][hot_prop] = \
+                    hot_prop_val if hot_prop_val else default
+            if any(p in properties for p in FLAVOR_EXTRA_SPECS_LIST):
+                flavor_dict[nt.name]['extra_specs'] = {}
+                es_dict = flavor_dict[nt.name]['extra_specs']
+                populate_flavor_extra_specs(es_dict, properties,
+                                            flavor_extra_input)
+    return flavor_dict
