@@ -742,3 +742,54 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
                         six.text_type(e))
                     _handle_vnf_scaling_post(constants.ERROR)
 
+        # wait
+        def _vnf_policy_action_wait():
+            try:
+                LOG.debug("Policy %s action is in progress",
+                          policy['name'])
+                mgmt_ip_address = self._vnf_manager.invoke(
+                    infra_driver,
+                    'scale_wait',
+                    plugin=self,
+                    context=context,
+                    auth_attr=vim_auth,
+                    policy=policy,
+                    region_name=region_name,
+                    last_event_id=last_event_id
+                )
+                LOG.debug("Policy %s action is completed successfully",
+                          policy['name'])
+                _handle_vnf_scaling_post(constants.ACTIVE, mgmt_ip_address)
+                # TODO(kanagaraj-manickam): Add support for config and mgmt
+            except Exception as e:
+                LOG.error("Policy %s action is failed to complete",
+                          policy['name'])
+                with excutils.save_and_reraise_exception():
+                    self.set_vnf_error_status_reason(
+                        context,
+                        policy['vnf']['id'],
+                        six.text_type(e))
+                    _handle_vnf_scaling_post(constants.ERROR)
+
+        _validate_scaling_policy()
+
+        vnf = _handle_vnf_scaling_pre()
+        policy['instance_id'] = vnf['instance_id']
+
+        infra_driver, vim_auth = self._get_infra_driver(context, vnf)
+        region_name = vnf.get('placement_attr', {}).get('region_name', None)
+        last_event_id = _vnf_policy_action()
+        self.spawn_n(_vnf_policy_action_wait)
+
+        return policy
+
+    def _make_policy_dict(self, vnf, name, policy):
+        p = {}
+        p['type'] = policy.get('type')
+        p['properties'] = policy.get('properties') or policy.get(
+            'triggers') or policy.get('reservation')
+        p['vnf'] = vnf
+        p['name'] = name
+        p['id'] = uuidutils.generate_uuid()
+        return p
+
