@@ -924,3 +924,47 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
 
         return vnf_trigger
 
+    def get_vnf_trigger(self, context, vnf_id, trigger_name):
+        trigger = self._get_vnf_triggers(
+            context, vnf_id, filters={'name': trigger_name})
+        if not trigger:
+            raise exceptions.TriggerNotFound(
+                trigger_name=trigger_name,
+                vnf_id=vnf_id
+            )
+        return trigger
+
+    def _handle_vnf_monitoring(self, context, trigger):
+
+        vnf_dict = trigger['vnf']
+        # Multiple actions support
+        if trigger.get('policy_actions'):
+            policy_actions = trigger['policy_actions']
+            if policy_actions.get('def_actions'):
+                for action in policy_actions['def_actions']:
+                    self._vnf_action.invoke(
+                        action, 'execute_action', plugin=self, context=context,
+                        vnf_dict=vnf_dict, args={})
+            if policy_actions.get('custom_actions'):
+                custom_actions = policy_actions['custom_actions']
+                for pl_action, pl_action_dict in custom_actions.items():
+                    bckend_policy = pl_action_dict['bckend_policy']
+                    bckend_action = pl_action_dict['bckend_action']
+                    bckend_policy_type = bckend_policy['type']
+                    if bckend_policy_type == constants.POLICY_SCALING:
+                        if vnf_dict['status'] != constants.ACTIVE:
+                            LOG.info(_("Scaling Policy action "
+                                       "skipped due to status "
+                                       "%(status)s for vnf %(vnfid)s") %
+                                     {"status": vnf_dict['status'],
+                                      "vnfid": vnf_dict['id']})
+                            return
+                        action = 'autoscaling'
+                        scale = {}
+                        scale.setdefault('scale', {})
+                        scale['scale']['type'] = bckend_action
+                        scale['scale']['policy'] = bckend_policy['name']
+                        self._vnf_action.invoke(
+                            action, 'execute_action', plugin=self,
+                            context=context, vnf_dict=vnf_dict, args=scale)
+
