@@ -583,3 +583,73 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
 
         return vnf_dict
 
+    def _delete_vnf_wait(self, context, vnf_dict, auth_attr, driver_name):
+        instance_id = self._instance_id(vnf_dict)
+        e = None
+        if instance_id:
+            placement_attr = vnf_dict['placement_attr']
+            region_name = placement_attr.get('region_name')
+            try:
+                self._vnf_manager.invoke(
+                    driver_name,
+                    'delete_wait',
+                    plugin=self,
+                    context=context,
+                    vnf_id=instance_id,
+                    auth_attr=auth_attr,
+                    region_name=region_name)
+            except Exception as e_:
+                e = e_
+                vnf_dict['status'] = constants.ERROR
+                vnf_dict['error_reason'] = six.text_type(e)
+                LOG.exception('_delete_vnf_wait')
+                self.set_vnf_error_status_reason(context, vnf_dict['id'],
+                                                 vnf_dict['error_reason'])
+
+        self.mgmt_delete_post(context, vnf_dict)
+        self._delete_vnf_post(context, vnf_dict, e)
+
+    def delete_vnf(self, context, vnf_id, vnf=None):
+
+        # Extract "force_delete" from request's body
+        force_delete = False
+        if vnf and vnf['vnf'].get('attributes').get('force'):
+            force_delete = vnf['vnf'].get('attributes').get('force')
+        if force_delete and not context.is_admin:
+            LOG.warning("force delete is admin only operation")
+            raise exceptions.AdminRequired(reason="Admin only operation")
+        vnf_dict = self._delete_vnf_pre(context, vnf_id,
+                                        force_delete=force_delete)
+        driver_name, vim_auth = self._get_infra_driver(context, vnf_dict)
+        self._vnf_monitor.delete_hosting_vnf(vnf_id)
+        instance_id = self._instance_id(vnf_dict)
+        placement_attr = vnf_dict['placement_attr']
+        region_name = placement_attr.get('region_name')
+        kwargs = {
+            mgmt_constants.KEY_ACTION: mgmt_constants.ACTION_DELETE_VNF,
+            mgmt_constants.KEY_KWARGS: {'vnf': vnf_dict},
+        }
+        try:
+            self.mgmt_delete_pre(context, vnf_dict)
+            self.mgmt_call(context, vnf_dict, kwargs)
+            if instance_id:
+                self._vnf_manager.invoke(driver_name,
+                                         'delete',
+                                         plugin=self,
+                                         context=context,
+                                         vnf_id=instance_id,
+                                         auth_attr=vim_auth,
+                                         region_name=region_name)
+        except Exception as e:
+            # TODO(yamahata): when the device is already deleted. mask
+            # the error, and delete row in db
+            # Other case mark error
+            with excutils.save_and_reraise_exception():
+                if not force_delete:
+                    vnf_dict['status'] = constants.ERROR
+                    vnf_dict['error_reason'] = six.text_type(e)
+                    self.set_vnf_error_status_reason(context, vnf_dict['id'],
+                                                     vnf_dict['error_reason'])
+                    self.mgmt_delete_post(context, vnf_dict)
+                    self._delete_vnf_post(context, vnf_dict, e)
+
