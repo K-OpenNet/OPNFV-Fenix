@@ -580,3 +580,114 @@ def post_process_heat_template(heat_tpl, mgmt_ports, metadata,
     lambda dumper, value: represent_odict(dumper,
                                           u'tag:yaml.org,2002:map', value))
     return yaml.safe_dump(heat_dict)
+
+
+
+@log.log
+def add_volume_resources(heat_dict, vol_res):
+    # Add cinder volumes
+    for res_name, cinder_vol in vol_res['volumes'].items():
+        heat_dict['resources'][res_name] = {
+            'type': 'OS::Cinder::Volume',
+            'properties': {}
+        }
+        for prop_name, prop_val in cinder_vol.items():
+            heat_dict['resources'][res_name]['properties'][prop_name] = \
+                prop_val
+    # Add cinder volume attachments
+    for res_name, cinder_vol in vol_res['volume_attachments'].items():
+        heat_dict['resources'][res_name] = {
+            'type': 'OS::Cinder::VolumeAttachment',
+            'properties': {}
+        }
+        for prop_name, prop_val in cinder_vol.items():
+            heat_dict['resources'][res_name]['properties'][prop_name] = \
+                prop_val
+
+
+@log.log
+def post_process_template(template):
+    def _add_scheduler_hints_property(nt):
+        hints = nt.get_property_value('scheduler_hints')
+        if hints is None:
+            hints = OrderedDict()
+            hints_schema = {'type': 'map', 'required': False,
+                            'entry_schema': {'type': 'string'}}
+            hints_prop = properties.Property('scheduler_hints',
+                                             hints,
+                                             hints_schema)
+            nt.get_properties_objects().append(hints_prop)
+        return hints
+
+    for nt in template.nodetemplates:
+        if (nt.type_definition.is_derived_from(MONITORING) or
+            nt.type_definition.is_derived_from(FAILURE) or
+                nt.type_definition.is_derived_from(PLACEMENT)):
+            template.nodetemplates.remove(nt)
+            continue
+
+        if nt.type in delpropmap.keys():
+            for prop in delpropmap[nt.type]:
+                for p in nt.get_properties_objects():
+                    if prop == p.name:
+                        nt.get_properties_objects().remove(p)
+
+        # change the property value first before the property key
+        if nt.type in convert_prop_values:
+            for prop in convert_prop_values[nt.type].keys():
+                for p in nt.get_properties_objects():
+                    if (prop == p.name and
+                            p.value in
+                            convert_prop_values[nt.type][prop].keys()):
+                        v = convert_prop_values[nt.type][prop][p.value]
+                        p.value = v
+
+        if nt.type in convert_prop:
+            for prop in convert_prop[nt.type].keys():
+                for p in nt.get_properties_objects():
+                    if prop == p.name:
+                        schema_dict = {'type': p.type}
+                        v = nt.get_property_value(p.name)
+                        newprop = properties.Property(
+                            convert_prop[nt.type][prop], v, schema_dict)
+                        nt.get_properties_objects().append(newprop)
+                        nt.get_properties_objects().remove(p)
+
+        if nt.type_definition.is_derived_from(TACKERVDU):
+            reservation_metadata = nt.get_property_value(
+                'reservation_metadata')
+            if reservation_metadata is not None:
+                hints = _add_scheduler_hints_property(nt)
+
+                input_resource_type = reservation_metadata.get(
+                    'resource_type')
+                input_id = reservation_metadata.get('id')
+
+                # Checking if 'resource_type' and 'id' is passed through a
+                # input parameter file or not. If it's then get the value
+                # from input parameter file.
+                if (isinstance(input_resource_type, OrderedDict) and
+                        input_resource_type.get('get_input')):
+                    input_resource_type = template.parsed_params.get(
+                        input_resource_type.get('get_input'))
+                # TODO(niraj-singh): Remove this validation once bug
+                # 1815755 is fixed.
+                if input_resource_type not in (
+                        'physical_host', 'virtual_instance'):
+                    raise exceptions.Invalid(
+                        'resoure_type must be physical_host'
+                        ' or virtual_instance')
+
+                if (isinstance(input_id, OrderedDict) and
+                        input_id.get('get_input')):
+                    input_id = template.parsed_params.get(
+                        input_id.get('get_input'))
+
+                if input_resource_type == 'physical_host':
+                    hints['reservation'] = input_id
+                elif input_resource_type == 'virtual_instance':
+                    hints['group'] = input_id
+                nt.get_properties_objects().remove(nt.get_properties().get(
+                    'reservation_metadata'))
+
+
