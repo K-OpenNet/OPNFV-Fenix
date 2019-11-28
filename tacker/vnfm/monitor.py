@@ -438,3 +438,33 @@ class VNFReservationAlarmMonitor(VNFAlarmMonitor):
         return self.process_alarm(driver, vnf, alarm_dict)
 
 
+
+class VNFMaintenanceAlarmMonitor(VNFAlarmMonitor):
+    """VNF Maintenance Alarm monitor"""
+
+    def update_vnf_with_maintenance(self, vnf, vdu_names):
+        alarm_url = dict()
+
+        for vdu in vdu_names:
+            params = dict()
+            params['vnf_id'] = vnf['id']
+            params['mon_policy_name'] = 'maintenance'
+            params['mon_policy_action'] = vnf['tenant_id']
+            driver = 'ceilometer'
+
+            action = vdu + '_maintenance'
+            alarm_url[action] = self.call_alarm_url(driver, vnf, params)
+            details = "Alarm URL set successfully: %s" % alarm_url
+            vnfm_utils.log_events(t_context.get_admin_context(), vnf,
+                                  constants.RES_EVT_MONITOR, details)
+        return alarm_url
+
+    def process_alarm_for_vnf(self, vnf, trigger):
+        """call in plugin"""
+        params = trigger['params']
+        alarm_dict = dict()
+        alarm_dict['alarm_id'] = params['data'].get('alarm_id')
+        alarm_dict['status'] = params['data'].get('current')
+        driver = 'ceilometer'
+        return self.process_alarm(driver, vnf, alarm_dict)
+
