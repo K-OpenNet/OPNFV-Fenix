@@ -159,3 +159,61 @@ class VNFMonitor(object):
                                           vnf_to_update['vnf'],
                                           constants.RES_EVT_HEAL,
                                           evt_details=evt_details)
+
+
+    def run_monitor(self, hosting_vnf):
+        mgmt_ips = hosting_vnf['mgmt_ip_addresses']
+        vdupolicies = hosting_vnf['monitoring_policy']['vdus']
+
+        vnf_delay = hosting_vnf['monitoring_policy'].get(
+            'monitoring_delay', self.boot_wait)
+
+        for vdu in vdupolicies.keys():
+            if hosting_vnf.get('dead') or (
+                    hosting_vnf['vnf']['status']) == constants.PENDING_HEAL:
+                return
+
+            policy = vdupolicies[vdu]
+            for driver in policy.keys():
+                params = policy[driver].get('monitoring_params', {})
+
+                vdu_delay = params.get('monitoring_delay', vnf_delay)
+
+                if not timeutils.is_older_than(
+                    hosting_vnf['boot_at'],
+                        vdu_delay):
+                        continue
+
+                actions = policy[driver].get('actions', {})
+                params['mgmt_ip'] = mgmt_ips[vdu]
+
+                driver_return = self.monitor_call(driver,
+                                                  hosting_vnf['vnf'],
+                                                  params)
+
+                LOG.debug('driver_return %s', driver_return)
+
+                if driver_return in actions:
+                    action = actions[driver_return]
+                    hosting_vnf['action_cb'](action, vdu_name=vdu)
+
+    def mark_dead(self, vnf_id):
+        VNFMonitor._hosting_vnfs[vnf_id]['dead'] = True
+
+    def _invoke(self, driver, **kwargs):
+        method = inspect.stack()[1][3]
+        return self._monitor_manager.invoke(
+            driver, method, **kwargs)
+
+    def monitor_get_config(self, vnf_dict):
+        return self._invoke(
+            vnf_dict, monitor=self, vnf=vnf_dict)
+
+    def monitor_url(self, vnf_dict):
+        return self._invoke(
+            vnf_dict, monitor=self, vnf=vnf_dict)
+
+    def monitor_call(self, driver, vnf_dict, kwargs):
+        return self._invoke(driver,
+                            vnf=vnf_dict, kwargs=kwargs)
+
