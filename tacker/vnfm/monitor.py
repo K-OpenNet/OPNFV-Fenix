@@ -404,3 +404,37 @@ class VNFReservationAlarmMonitor(VNFAlarmMonitor):
         if len(scaling_policies) == 0:
             raise exceptions.VnfPolicyNotFound(
                 policy=constants.POLICY_SCALING, vnf_id=vnf['id'])
+
+        for scaling_policy in scaling_policies:
+            # validating start_action for scale-out policy action
+            if scaling_policy['name'] not in start_action:
+                raise exceptions.Invalid(
+                    'Not a valid template: start_action must contain'
+                    ' %s as scaling-out action' % scaling_policy['name'])
+
+            # validating before_end and end_actions for scale-in policy action
+            if scaling_policy['name'] not in before_end_action:
+                if scaling_policy['name'] not in end_action:
+                    raise exceptions.Invalid(
+                        'Not a valid template:'
+                        ' before_end_action or end_action'
+                        ' should contain scaling policy: %s'
+                        % scaling_policy['name'])
+
+        for action in constants.RESERVATION_POLICY_ACTIONS:
+            scaling_type = "-out" if action == 'start_actions' else "-in"
+            create_alarm_action(action, policy_dict[
+                'reservation'][action], scaling_type)
+
+        return alarm_url
+
+    def process_alarm_for_vnf(self, vnf, trigger):
+        """call in plugin"""
+        params = trigger['params']
+        alarm_dict = dict()
+        alarm_dict['alarm_id'] = params['data'].get('alarm_id')
+        alarm_dict['status'] = params['data'].get('current')
+        driver = 'ceilometer'
+        return self.process_alarm(driver, vnf, alarm_dict)
+
+
