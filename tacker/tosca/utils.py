@@ -267,3 +267,109 @@ def pre_process_alarm_resources(vnf, template, vdu_metadata, unique_id=None):
     alarm_resources['query_metadata'] = query_metadata
     alarm_resources['alarm_actions'] = alarm_actions
     return alarm_resources
+
+
+
+def _process_query_metadata(metadata, policy, unique_id):
+    query_mtdata = dict()
+    triggers = policy.entity_tpl['triggers']
+    for trigger_name, trigger_dict in triggers.items():
+        resource_type = trigger_dict.get('condition').get('resource_type')
+        # TODO(phuoc): currently, Tacker only supports resource_type with
+        # instance value. Other types such as instance_network_interface,
+        # instance_disk can be supported in the future.
+        if resource_type == 'instance':
+            if not (trigger_dict.get('metadata') and metadata):
+                raise vnfm.MetadataNotMatched()
+            is_matched = False
+            for vdu_name, metadata_dict in metadata['vdus'].items():
+                trigger_dict['metadata'] = \
+                    (trigger_dict['metadata'] + '-' + unique_id)[:15]
+                if trigger_dict['metadata'] == \
+                        metadata_dict['metering.server_group']:
+                    is_matched = True
+            if not is_matched:
+                raise vnfm.MetadataNotMatched()
+            query_template = dict()
+            query_template['str_replace'] = dict()
+            query_template['str_replace']['template'] = \
+                '{"=": {"server_group": "scaling_group_id"}}'
+            scaling_group_param = \
+                {'scaling_group_id': trigger_dict['metadata']}
+            query_template['str_replace']['params'] = scaling_group_param
+        else:
+            raise vnfm.InvalidResourceType(resource_type=resource_type)
+        query_mtdata[trigger_name] = query_template
+    return query_mtdata
+
+
+def _process_query_metadata_reservation(metadata, policy):
+    query_metadata = dict()
+    policy_actions = policy.entity_tpl['reservation'].keys()
+    policy_actions.remove('properties')
+    for action in policy_actions:
+        query_template = [{
+            "field": 'traits.lease_id', "op": "eq",
+            "value": metadata['reservation']['lease_id']}]
+        query_metadata[action] = query_template
+
+    return query_metadata
+
+
+def _process_alarm_actions(vnf, policy):
+    # process  alarm url here
+    triggers = policy.entity_tpl['triggers']
+    alarm_actions = dict()
+    for trigger_name, trigger_dict in triggers.items():
+        alarm_url = vnf['attributes'].get(trigger_name)
+        if alarm_url:
+            alarm_url = str(alarm_url)
+            LOG.debug('Alarm url in heat %s', alarm_url)
+            alarm_actions[trigger_name] = dict()
+            alarm_actions[trigger_name]['alarm_actions'] = [alarm_url]
+    return alarm_actions
+
+
+def _process_alarm_actions_for_reservation(vnf, policy):
+    # process  alarm url here
+    alarm_actions = dict()
+    policy_actions = policy.entity_tpl['reservation'].keys()
+    policy_actions.remove('properties')
+    for action in policy_actions:
+        alarm_url = vnf['attributes'].get(action)
+        if alarm_url:
+            LOG.debug('Alarm url in heat %s', alarm_url)
+            alarm_actions[action] = dict()
+            alarm_actions[action]['alarm_actions'] = [alarm_url]
+    return alarm_actions
+
+
+def _process_alarm_actions_for_maintenance(vnf, vdus):
+    # process alarm url here
+    alarm_actions = dict()
+    maintenance_actions = [str(x) + '_maintenance' for x in vdus]
+    for action in maintenance_actions:
+        alarm_url = vnf['attributes'].get(action)
+        if alarm_url:
+            LOG.debug('Alarm url in heat %s', alarm_url)
+            alarm_actions[action] = dict()
+            alarm_actions[action]['alarm_actions'] = [alarm_url]
+    return alarm_actions
+
+
+def get_volumes(template):
+    volume_dict = dict()
+    node_tpl = template['topology_template']['node_templates']
+    for node_name in list(node_tpl.keys()):
+        node_value = node_tpl[node_name]
+        if node_value['type'] != BLOCKSTORAGE:
+            continue
+        volume_dict[node_name] = dict()
+        block_properties = node_value.get('properties', {})
+        for prop_name, prop_value in block_properties.items():
+            if prop_name == 'size':
+                prop_value = \
+                    re.compile('(\d+)\s*(\w+)').match(prop_value).groups()[0]
+            volume_dict[node_name][prop_name] = prop_value
+        del node_tpl[node_name]
+    return volume_dict
