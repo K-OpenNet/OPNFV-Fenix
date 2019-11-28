@@ -30,3 +30,29 @@ from tacker.plugins.common import constants
 from toscaparser import properties
 from toscaparser.utils import yamlparser
 
+
+
+FAILURE = 'tosca.policies.tacker.Failure'
+LOG = logging.getLogger(__name__)
+MONITORING = 'tosca.policies.Monitoring'
+SCALING = 'tosca.policies.Scaling'
+RESERVATION = 'tosca.policies.Reservation'
+PLACEMENT = 'tosca.policies.tacker.Placement'
+TACKERCP = 'tosca.nodes.nfv.CP.Tacker'
+TACKERVDU = 'tosca.nodes.nfv.VDU.Tacker'
+BLOCKSTORAGE = 'tosca.nodes.BlockStorage.Tacker'
+BLOCKSTORAGE_ATTACHMENT = 'tosca.nodes.BlockStorageAttachment'
+TOSCA_BINDS_TO = 'tosca.relationships.network.BindsTo'
+VDU = 'tosca.nodes.nfv.VDU'
+IMAGE = 'tosca.artifacts.Deployment.Image.VM'
+HEAT_SOFTWARE_CONFIG = 'OS::Heat::SoftwareConfig'
+OS_RESOURCES = {
+    'flavor': 'get_flavor_dict',
+        'image': 'get_image_dict'
+        }
+
+        FLAVOR_PROPS = {
+            "num_cpus": ("vcpus", 1, None),
+                "disk_size": ("disk", 1, "GB"),
+                    "mem_size": ("ram", 512, "MB")
+                    }
