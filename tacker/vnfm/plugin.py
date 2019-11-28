@@ -203,3 +203,53 @@ nit_monitoring(self):
         vnfd_yaml = vnfd_dict['attributes'].get('vnfd')
         if vnfd_yaml is None:
             return
+
+        inner_vnfd_dict = yaml.safe_load(vnfd_yaml)
+        LOG.debug('vnfd_dict: %s', inner_vnfd_dict)
+
+        # Prepend the tacker_defs.yaml import file with the full
+        # path to the file
+        toscautils.updateimports(inner_vnfd_dict)
+
+        try:
+            tosca = ToscaTemplate(a_file=False,
+                                  yaml_dict_tpl=inner_vnfd_dict)
+        except Exception as e:
+            LOG.exception("tosca-parser error: %s", str(e))
+            raise vnfm.ToscaParserFailed(error_msg_details=str(e))
+
+        if ('description' not in vnfd_dict or
+                vnfd_dict['description'] == ''):
+            vnfd_dict['description'] = inner_vnfd_dict.get(
+                'description', '')
+        if (('name' not in vnfd_dict or
+                not len(vnfd_dict['name'])) and
+                'metadata' in inner_vnfd_dict):
+            vnfd_dict['name'] = inner_vnfd_dict['metadata'].get(
+                'template_name', '')
+
+        vnfd_dict['mgmt_driver'] = toscautils.get_mgmt_driver(
+            tosca)
+
+        if vnfd_dict['mgmt_driver'] not in cfg.CONF.tacker.mgmt_driver:
+            LOG.error("Invalid mgmt_driver in TOSCA template")
+            raise vnfm.InvalidMgmtDriver(
+                mgmt_driver_name=vnfd_dict['mgmt_driver'])
+
+        LOG.debug('vnfd %s', vnfd)
+
+    def add_vnf_to_monitor(self, context, vnf_dict):
+        dev_attrs = vnf_dict['attributes']
+        mgmt_ip_address = vnf_dict['mgmt_ip_address']
+        if 'monitoring_policy' in dev_attrs and mgmt_ip_address:
+            def action_cb(action, **kwargs):
+                LOG.debug('policy action: %s', action)
+                self._vnf_action.invoke(
+                    action, 'execute_action', plugin=self, context=context,
+                    vnf_dict=hosting_vnf['vnf'], args=kwargs)
+
+            hosting_vnf = self._vnf_monitor.to_hosting_vnf(
+                vnf_dict, action_cb)
+            LOG.debug('hosting_vnf: %s', hosting_vnf)
+            self._vnf_monitor.add_hosting_vnf(hosting_vnf)
+
