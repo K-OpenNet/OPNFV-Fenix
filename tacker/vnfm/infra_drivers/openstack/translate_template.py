@@ -236,3 +236,110 @@ class TOSCAToHOT(object):
         port_dict['properties'].update(network_param)
         template_dict['resources'][port] = port_dict
         return port, template_dict
+
+
+    @log.log
+    def _get_unsupported_resource_props(self, heat_client):
+        unsupported_resource_props = {}
+
+        for res, prop_dict in (HEAT_VERSION_INCOMPATIBILITY_MAP).items():
+            unsupported_props = {}
+            for prop, val in (prop_dict).items():
+                if not heat_client.resource_attr_support(res, prop):
+                    unsupported_props.update(prop_dict)
+            if unsupported_props:
+                unsupported_resource_props[res] = unsupported_props
+        self.unsupported_props = unsupported_resource_props
+
+    @log.log
+    def _generate_hot_from_tosca(self, vnfd_dict, dev_attrs):
+        parsed_params = {}
+        if 'param_values' in dev_attrs and dev_attrs['param_values'] != "":
+            try:
+                parsed_params = yaml.safe_load(dev_attrs['param_values'])
+            except Exception as e:
+                LOG.debug("Params not Well Formed: %s", str(e))
+                raise vnfm.ParamYAMLNotWellFormed(error_msg_details=str(e))
+
+        appmonitoring_dict = \
+            toscautils.get_vdu_applicationmonitoring(vnfd_dict)
+
+        block_storage_details = toscautils.get_block_storage_details(
+            vnfd_dict)
+        toscautils.updateimports(vnfd_dict)
+        if 'substitution_mappings' in str(vnfd_dict):
+            toscautils.check_for_substitution_mappings(
+                vnfd_dict,
+                parsed_params
+            )
+
+        try:
+            tosca = tosca_template.ToscaTemplate(parsed_params=parsed_params,
+                                                 a_file=False,
+                                                 yaml_dict_tpl=vnfd_dict)
+
+        except Exception as e:
+            LOG.debug("tosca-parser error: %s", str(e))
+            raise vnfm.ToscaParserFailed(error_msg_details=str(e))
+
+        unique_id = uuidutils.generate_uuid()
+        metadata = toscautils.get_vdu_metadata(tosca, unique_id=unique_id)
+        for policy in tosca.policies:
+            if policy.entity_tpl['type'] == constants.POLICY_RESERVATION:
+                metadata = toscautils.get_metadata_for_reservation(
+                    tosca, metadata)
+                break
+
+        alarm_resources = toscautils.pre_process_alarm_resources(
+            self.vnf, tosca, metadata, unique_id=unique_id)
+        monitoring_dict = toscautils.get_vdu_monitoring(tosca)
+        mgmt_ports = toscautils.get_mgmt_ports(tosca)
+        nested_resource_name = toscautils.get_nested_resources_name(tosca)
+        sub_heat_tmpl_name = toscautils.get_sub_heat_tmpl_name(tosca)
+        res_tpl = toscautils.get_resources_dict(tosca,
+                                                self.STACK_FLAVOR_EXTRA)
+        if toscautils.get_maintenance_vdus(tosca):
+            res_tpl = toscautils.get_resources_for_maintenance(tosca, res_tpl)
+
+        toscautils.post_process_template(tosca)
+        scaling_policy_names = toscautils.get_scaling_policy(tosca)
+        try:
+            translator = tosca_translator.TOSCATranslator(tosca, parsed_params)
+            heat_template_yaml = translator.translate()
+            if nested_resource_name:
+                sub_heat_template_yaml =\
+                    translator.translate_to_yaml_files_dict(sub_heat_tmpl_name)
+                nested_resource_yaml =\
+                    sub_heat_template_yaml[nested_resource_name]
+                LOG.debug("nested_resource_yaml: %s", nested_resource_yaml)
+                self.nested_resources[nested_resource_name] =\
+                    nested_resource_yaml
+
+        except Exception as e:
+            LOG.debug("heat-translator error: %s", str(e))
+            raise vnfm.HeatTranslatorFailed(error_msg_details=str(e))
+
+        if self.nested_resources:
+            nested_tpl = toscautils.update_nested_scaling_resources(
+                self.nested_resources, mgmt_ports, metadata,
+                res_tpl, self.unsupported_props)
+            self.fields['files'] = nested_tpl
+            self.vnf['attributes'][nested_resource_name] =\
+                nested_tpl[nested_resource_name]
+            mgmt_ports.clear()
+
+        if scaling_policy_names:
+            scaling_group_dict = toscautils.get_scaling_group_dict(
+                heat_template_yaml, scaling_policy_names)
+            self.vnf['attributes']['scaling_group_names'] =\
+                jsonutils.dump_as_bytes(scaling_group_dict)
+
+        heat_template_yaml = toscautils.post_process_heat_template(
+            heat_template_yaml, mgmt_ports, metadata, alarm_resources,
+            res_tpl, block_storage_details, self.unsupported_props,
+            unique_id=unique_id)
+
+        self.heat_template_yaml = heat_template_yaml
+        self.monitoring_dict = monitoring_dict
+        self.metadata = metadata
+        self.appmonitoring_dict = appmonitoring_dict
