@@ -96,3 +96,37 @@ class VNFMMgmtMixin(object):
     def mgmt_delete_post(self, context, vnf_dict):
         return self._invoke(
             vnf_dict, plugin=self, context=context, vnf=vnf_dict)
+
+    def mgmt_get_config(self, context, vnf_dict):
+        return self._invoke(
+            vnf_dict, plugin=self, context=context, vnf=vnf_dict)
+
+    def mgmt_ip_address(self, context, vnf_dict):
+        return self._invoke(
+            vnf_dict, plugin=self, context=context, vnf=vnf_dict)
+
+    def mgmt_call(self, context, vnf_dict, kwargs):
+        return self._invoke(
+            vnf_dict, plugin=self, context=context, vnf=vnf_dict,
+            kwargs=kwargs)
+
+
+class VNFMPlugin(vnfm_db.VNFMPluginDb, VNFMMgmtMixin):
+    """VNFMPlugin which supports VNFM framework.
+
+    Plugin which supports Tacker framework
+    """
+    OPTS_INFRA_DRIVER = [
+        cfg.ListOpt(
+            'infra_driver', default=['noop', 'openstack', 'kubernetes'],
+            help=_('Hosting vnf drivers tacker plugin will use')),
+    ]
+    cfg.CONF.register_opts(OPTS_INFRA_DRIVER, 'tacker')
+
+    OPTS_POLICY_ACTION = [
+        cfg.ListOpt(
+            'policy_action', default=['autoscaling', 'respawn',
+                                      'vdu_autoheal', 'log', 'log_and_kill'],
+            help=_('Hosting vnf drivers tacker plugin will use')),
+    ]
+    cfg.CONF.register_opts(OPTS_POLICY_ACTION, 'tacker')
