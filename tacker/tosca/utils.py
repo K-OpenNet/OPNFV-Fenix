@@ -373,3 +373,134 @@ def get_volumes(template):
             volume_dict[node_name][prop_name] = prop_value
         del node_tpl[node_name]
     return volume_dict
+
+
+
+@log.log
+def get_vol_attachments(template):
+    vol_attach_dict = dict()
+    node_tpl = template['topology_template']['node_templates']
+    valid_properties = {
+        'location': 'mountpoint'
+    }
+    for node_name in list(node_tpl.keys()):
+        node_value = node_tpl[node_name]
+        if node_value['type'] != BLOCKSTORAGE_ATTACHMENT:
+            continue
+        vol_attach_dict[node_name] = dict()
+        vol_attach_properties = node_value.get('properties', {})
+        # parse properties
+        for prop_name, prop_value in vol_attach_properties.items():
+            if prop_name in valid_properties:
+                vol_attach_dict[node_name][valid_properties[prop_name]] = \
+                    prop_value
+        # parse requirements to get mapping of cinder volume <-> Nova instance
+        for req in node_value.get('requirements', {}):
+            if 'virtualBinding' in req:
+                vol_attach_dict[node_name]['instance_uuid'] = \
+                    {'get_resource': req['virtualBinding']['node']}
+            elif 'virtualAttachment' in req:
+                vol_attach_dict[node_name]['volume_id'] = \
+                    {'get_resource': req['virtualAttachment']['node']}
+        del node_tpl[node_name]
+    return vol_attach_dict
+
+
+@log.log
+def get_block_storage_details(template):
+    block_storage_details = dict()
+    block_storage_details['volumes'] = get_volumes(template)
+    block_storage_details['volume_attachments'] = get_vol_attachments(template)
+    return block_storage_details
+
+
+@log.log
+def get_mgmt_ports(tosca):
+    mgmt_ports = {}
+    for nt in tosca.nodetemplates:
+        if nt.type_definition.is_derived_from(TACKERCP):
+            mgmt = nt.get_property_value('management') or None
+            if mgmt:
+                vdu = None
+                for rel, node in nt.relationships.items():
+                    if rel.is_derived_from(TOSCA_BINDS_TO):
+                        vdu = node.name
+                        break
+
+                if vdu is not None:
+                    name = 'mgmt_ip-%s' % vdu
+                    mgmt_ports[name] = nt.name
+    LOG.debug('mgmt_ports: %s', mgmt_ports)
+    return mgmt_ports
+
+
+@log.log
+def add_resources_tpl(heat_dict, hot_res_tpl):
+    for res, res_dict in (hot_res_tpl).items():
+        for vdu, vdu_dict in (res_dict).items():
+            res_name = vdu + "_" + res
+            heat_dict["resources"][res_name] = {
+                "type": HEAT_RESOURCE_MAP[res],
+                "properties": {}
+            }
+
+            if res == "maintenance":
+                continue
+            for prop, val in (vdu_dict).items():
+                # change from 'get_input' to 'get_param' to meet HOT template
+                if isinstance(val, dict):
+                    if 'get_input' in val:
+                        val['get_param'] = val.pop('get_input')
+                heat_dict["resources"][res_name]["properties"][prop] = val
+            if heat_dict["resources"].get(vdu):
+                heat_dict["resources"][vdu]["properties"][res] = {
+                    "get_resource": res_name
+                }
+
+
+@log.log
+def convert_unsupported_res_prop(heat_dict, unsupported_res_prop):
+    res_dict = heat_dict['resources']
+
+    for res, attr in (res_dict).items():
+        res_type = attr['type']
+        if res_type in unsupported_res_prop:
+            prop_dict = attr['properties']
+            unsupported_prop_dict = unsupported_res_prop[res_type]
+            unsupported_prop = set(prop_dict.keys()) & set(
+                unsupported_prop_dict.keys())
+            for prop in unsupported_prop:
+                    # some properties are just punted to 'value_specs'
+                    # property if they are incompatible
+                    new_prop = unsupported_prop_dict[prop]
+                    if new_prop == 'value_specs':
+                        prop_dict.setdefault(new_prop, {})[
+                            prop] = prop_dict.pop(prop)
+                    else:
+                        prop_dict[new_prop] = prop_dict.pop(prop)
+
+
+@log.log
+def represent_odict(dump, tag, mapping, flow_style=None):
+    value = []
+    node = yaml.MappingNode(tag, value, flow_style=flow_style)
+    if dump.alias_key is not None:
+        dump.represented_objects[dump.alias_key] = node
+    best_style = True
+    if hasattr(mapping, 'items'):
+        mapping = mapping.items()
+    for item_key, item_value in mapping:
+        node_key = dump.represent_data(item_key)
+        node_value = dump.represent_data(item_value)
+        if not (isinstance(node_key, yaml.ScalarNode) and not node_key.style):
+            best_style = False
+        if not (isinstance(node_value, yaml.ScalarNode)
+                and not node_value.style):
+            best_style = False
+        value.append((node_key, node_value))
+    if flow_style is None:
+        if dump.default_flow_style is not None:
+            node.flow_style = dump.default_flow_style
+        else:
+            node.flow_style = best_style
+    return node
