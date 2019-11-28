@@ -327,3 +327,29 @@ class VNFAlarmMonitor(object):
             vnfm_utils.log_events(t_context.get_admin_context(), vnf,
                                   constants.RES_EVT_MONITOR, details)
         return alarm_url
+
+
+    def process_alarm_for_vnf(self, vnf, trigger):
+        """call in plugin"""
+        params = trigger['params']
+        mon_prop = trigger['trigger']
+        alarm_dict = dict()
+        alarm_dict['alarm_id'] = params['data'].get('alarm_id')
+        alarm_dict['status'] = params['data'].get('current')
+        trigger_name, trigger_dict = list(mon_prop.items())[0]
+        driver = trigger_dict['event_type']['implementation']
+        return self.process_alarm(driver, vnf, alarm_dict)
+
+    def _invoke(self, driver, **kwargs):
+        method = inspect.stack()[1][3]
+        return self._alarm_monitor_manager.invoke(
+            driver, method, **kwargs)
+
+    def call_alarm_url(self, driver, vnf_dict, kwargs):
+        return self._invoke(driver,
+                            vnf=vnf_dict, kwargs=kwargs)
+
+    def process_alarm(self, driver, vnf_dict, kwargs):
+        return self._invoke(driver,
+                            vnf=vnf_dict, kwargs=kwargs)
+
