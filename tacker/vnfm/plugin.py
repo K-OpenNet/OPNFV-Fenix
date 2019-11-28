@@ -968,3 +968,40 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
                             action, 'execute_action', plugin=self,
                             context=context, vnf_dict=vnf_dict, args=scale)
 
+    def create_vnf_trigger(
+            self, context, vnf_id, trigger):
+        trigger_ = self.get_vnf_trigger(
+            context, vnf_id, trigger['trigger']['policy_name'])
+        # action_name before analyzing
+        trigger_.update({'action_name': trigger['trigger']['action_name']})
+        trigger_.update({'params': trigger['trigger']['params']})
+        policy_actions = self._validate_alarming_policy(
+            context, vnf_id, trigger_)
+        if policy_actions:
+            trigger_.update(policy_actions)
+        self._handle_vnf_monitoring(context, trigger_)
+        return trigger['trigger']
+
+    def get_vnf_resources(self, context, vnf_id, fields=None, filters=None):
+        vnf_info = self.get_vnf(context, vnf_id)
+        infra_driver, vim_auth = self._get_infra_driver(context, vnf_info)
+        region_name = vnf_info.get('placement_attr', {}).\
+            get('region_name', None)
+        if vnf_info['status'] == constants.ACTIVE:
+            vnf_details = self._vnf_manager.invoke(infra_driver,
+                                                   'get_resource_info',
+                                                   plugin=self,
+                                                   context=context,
+                                                   vnf_info=vnf_info,
+                                                   auth_attr=vim_auth,
+                                                   region_name=region_name)
+            resources = [{'name': name,
+                          'type': info.get('type'),
+                          'id': info.get('id')}
+                        for name, info in vnf_details.items()]
+            return resources
+        # Raise exception when VNF.status != ACTIVE
+        else:
+            raise vnfm.VNFInactive(vnf_id=vnf_id,
+                                   message=_(' Cannot fetch details'))
+
