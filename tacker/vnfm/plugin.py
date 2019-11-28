@@ -130,3 +130,23 @@ class VNFMPlugin(vnfm_db.VNFMPluginDb, VNFMMgmtMixin):
             help=_('Hosting vnf drivers tacker plugin will use')),
     ]
     cfg.CONF.register_opts(OPTS_POLICY_ACTION, 'tacker')
+
+    supported_extension_aliases = ['vnfm']
+
+    def __init__(self):
+        super(VNFMPlugin, self).__init__()
+        self._pool = eventlet.GreenPool()
+        self.boot_wait = cfg.CONF.tacker.boot_wait
+        self.vim_client = vim_client.VimClient()
+        self._vnf_manager = driver_manager.DriverManager(
+            'tacker.tacker.vnfm.drivers',
+            cfg.CONF.tacker.infra_driver)
+        self._vnf_action = driver_manager.DriverManager(
+            'tacker.tacker.policy.actions',
+            cfg.CONF.tacker.policy_action)
+        self._vnf_monitor = monitor.VNFMonitor(self.boot_wait)
+        self._vnf_alarm_monitor = monitor.VNFAlarmMonitor()
+        self._vnf_reservation_monitor = monitor.VNFReservationAlarmMonitor()
+        self._vnf_maintenance_monitor = monitor.VNFMaintenanceAlarmMonitor()
+        self._vnf_app_monitor = monitor.VNFAppMonitor()
+        self._init_monitoring()
