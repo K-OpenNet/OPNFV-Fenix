@@ -217,3 +217,46 @@ class VNFMonitor(object):
         return self._invoke(driver,
                             vnf=vnf_dict, kwargs=kwargs)
 
+
+
+class VNFAppMonitor(object):
+    """VNF App monitor"""
+    OPTS = [
+        cfg.ListOpt(
+            'app_monitor_driver', default=['zabbix'],
+            help=_('App monitoring driver to communicate with '
+                   'Hosting VNF/logical service '
+                   'instance tacker plugin will use')),
+    ]
+    cfg.CONF.register_opts(OPTS, 'tacker')
+
+    def __init__(self):
+        self._application_monitor_manager = driver_manager.DriverManager(
+            'tacker.tacker.app_monitor.drivers',
+            cfg.CONF.tacker.app_monitor_driver)
+
+    def _create_app_monitoring_dict(self, dev_attrs, mgmt_ip_address):
+        app_policy = 'app_monitoring_policy'
+        appmonitoring_dict = ast.literal_eval(dev_attrs[app_policy])
+        vdulist = appmonitoring_dict['vdus'].keys()
+
+        for vduname in vdulist:
+            temp = ast.literal_eval(mgmt_ip_address)
+            appmonitoring_dict['vdus'][vduname]['mgmt_ip'] = temp[vduname]
+        return appmonitoring_dict
+
+    def create_app_dict(self, context, vnf_dict):
+        dev_attrs = vnf_dict['attributes']
+        mgmt_ip_address = vnf_dict['mgmt_ip_address']
+        return self._create_app_monitoring_dict(dev_attrs, mgmt_ip_address)
+
+    def _invoke(self, driver, **kwargs):
+        method = inspect.stack()[1][3]
+        return self._application_monitor_manager.\
+            invoke(driver, method, **kwargs)
+
+    def add_to_appmonitor(self, applicationvnfdict, vnf_dict):
+        vdunode = applicationvnfdict['vdus'].keys()
+        driver = applicationvnfdict['vdus'][vdunode[0]]['name']
+        kwargs = applicationvnfdict
+        return self._invoke(driver, vnf=vnf_dict, kwargs=kwargs)
