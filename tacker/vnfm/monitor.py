@@ -353,3 +353,54 @@ class VNFAlarmMonitor(object):
         return self._invoke(driver,
                             vnf=vnf_dict, kwargs=kwargs)
 
+
+class VNFReservationAlarmMonitor(VNFAlarmMonitor):
+    """VNF Reservation Alarm monitor"""
+
+    def update_vnf_with_reservation(self, plugin, context, vnf, policy_dict):
+
+        alarm_url = dict()
+
+        def create_alarm_action(action, action_list, scaling_type):
+            params = dict()
+            params['vnf_id'] = vnf['id']
+            params['mon_policy_name'] = action
+            driver = 'ceilometer'
+
+            def _refactor_backend_policy(bk_policy_name, bk_action_name):
+                policy = '%(policy_name)s%(action_name)s' % {
+                    'policy_name': bk_policy_name,
+                    'action_name': bk_action_name}
+                return policy
+
+            for index, policy_action_name in enumerate(action_list):
+                filters = {'name': policy_action_name}
+                bkend_policies = \
+                    plugin.get_vnf_policies(context, vnf['id'], filters)
+                if bkend_policies:
+                    if constants.POLICY_SCALING in str(bkend_policies[0]):
+                        action_list[index] = _refactor_backend_policy(
+                            policy_action_name, scaling_type)
+
+                # Support multiple action. Ex: respawn % notify
+                action_name = '%'.join(action_list)
+                params['mon_policy_action'] = action_name
+                alarm_url[action] = \
+                    self.call_alarm_url(driver, vnf, params)
+                details = "Alarm URL set successfully: %s" % alarm_url
+                vnfm_utils.log_events(t_context.get_admin_context(), vnf,
+                                      constants.RES_EVT_MONITOR,
+                                      details)
+
+        before_end_action = policy_dict['reservation']['before_end_actions']
+        end_action = policy_dict['reservation']['end_actions']
+        start_action = policy_dict['reservation']['start_actions']
+
+        scaling_policies = \
+            plugin.get_vnf_policies(
+                context, vnf['id'], filters={
+                    'type': constants.POLICY_SCALING})
+
+        if len(scaling_policies) == 0:
+            raise exceptions.VnfPolicyNotFound(
+                policy=constants.POLICY_SCALING, vnf_id=vnf['id'])
