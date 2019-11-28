@@ -8,4 +8,6 @@ For Host upgrade or maintenance, administrator needs to migrate the services run
 ## Proposed change
 The scope of this spec focuses on:
 
-Designing a Fenix Plugin for VNF Maintenance. Whereby, an VNF Maintenance driver is designed to collect events triggered by the Ceilometer/aodh. In this spec, the VNF Maintenance driver subscribes event from ceilometer /AODH with ‘maintenance.planned’
+* Designing a Fenix Plugin for VNF Maintenance. Whereby, an VNF Maintenance driver is designed to collect events triggered by the Ceilometer/aodh. In this spec, the VNF Maintenance driver subscribes event from ceilometer /AODH with ‘maintenance.planned’
+* Defining maintenance policies using the TOSCA Policy format.
+
