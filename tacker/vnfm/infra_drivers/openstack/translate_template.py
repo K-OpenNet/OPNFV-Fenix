@@ -25,7 +25,7 @@ from tacker.common import log
 from tacker.extensions import common_services as cs
 from tacker.extensions import vnfm
 from tacker.plugins.common import constants
-from tacker.tosca import utils as toscautil
+from tacker.tosca import utils as toscautils
 
 
 
@@ -67,3 +67,24 @@ class TOSCAToHOT(object):
         self.STACK_FLAVOR_EXTRA = cfg.CONF.openstack_vim.flavor_extra_specs
         self.appmonitoring_dict = None
 
+    @log.log
+    def generate_hot(self):
+
+        self._get_vnfd()
+        dev_attrs = self._update_fields()
+
+        vnfd_dict = yamlparser.simple_ordered_parse(self.vnfd_yaml)
+        LOG.debug('vnfd_dict %s', vnfd_dict)
+        self._get_unsupported_resource_props(self.heatclient)
+
+        self._generate_hot_from_tosca(vnfd_dict, dev_attrs)
+        self.fields['template'] = self.heat_template_yaml
+        if not self.vnf['attributes'].get('heat_template'):
+            self.vnf['attributes']['heat_template'] = self.fields['template']
+        if self.monitoring_dict:
+            self.vnf['attributes'][
+                'monitoring_policy'] = jsonutils.dump_as_bytes(
+                self.monitoring_dict)
+        if self.appmonitoring_dict:
+            self.vnf['attributes']['app_monitoring_policy'] = \
+                jsonutils.dump_as_bytes(self.appmonitoring_dict)
