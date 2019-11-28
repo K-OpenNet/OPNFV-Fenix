@@ -289,3 +289,168 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
                     vnf_dict, maintenance_vdus)
             vnf_dict['attributes']['maintenance_policy'] = vnf_dict['id']
             vnf_dict['attributes'].update(alarm_url)
+
+    def add_vnf_to_appmonitor(self, context, vnf_dict):
+        appmonitor = self._vnf_app_monitor.create_app_dict(context, vnf_dict)
+        self._vnf_app_monitor.add_to_appmonitor(appmonitor, vnf_dict)
+
+    def config_vnf(self, context, vnf_dict):
+        config = vnf_dict['attributes'].get('config')
+        if not config:
+            return
+        if isinstance(config, str):
+            # TODO(dkushwaha) remove this load once db supports storing
+            # json format of yaml files in a separate column instead of
+            #  key value string pairs in vnf attributes table.
+            config = yaml.safe_load(config)
+
+        eventlet.sleep(self.boot_wait)      # wait for vm to be ready
+        vnf_id = vnf_dict['id']
+        update = {
+            'vnf': {
+                'id': vnf_id,
+                'attributes': {'config': config},
+            }
+        }
+        self.update_vnf(context, vnf_id, update)
+
+    def _get_infra_driver(self, context, vnf_info):
+        vim_res = self.get_vim(context, vnf_info)
+        return vim_res['vim_type'], vim_res['vim_auth']
+
+    def _create_vnf_wait(self, context, vnf_dict, auth_attr, driver_name):
+        vnf_id = vnf_dict['id']
+        instance_id = self._instance_id(vnf_dict)
+        create_failed = False
+
+        try:
+            self._vnf_manager.invoke(
+                driver_name, 'create_wait', plugin=self, context=context,
+                vnf_dict=vnf_dict, vnf_id=instance_id,
+                auth_attr=auth_attr)
+        except vnfm.VNFCreateWaitFailed as e:
+            LOG.error("VNF Create failed for vnf_id %s", vnf_id)
+            create_failed = True
+            vnf_dict['status'] = constants.ERROR
+            self.set_vnf_error_status_reason(context, vnf_id,
+                                             six.text_type(e))
+
+        if instance_id is None or create_failed:
+            mgmt_ip_address = None
+        else:
+            # mgmt_ip_address = self.mgmt_ip_address(context, vnf_dict)
+            # FIXME(yamahata):
+            mgmt_ip_address = vnf_dict['mgmt_ip_address']
+
+        self._create_vnf_post(
+            context, vnf_id, instance_id, mgmt_ip_address, vnf_dict)
+        self.mgmt_create_post(context, vnf_dict)
+
+        if instance_id is None or create_failed:
+            return
+
+        vnf_dict['mgmt_ip_address'] = mgmt_ip_address
+
+        kwargs = {
+            mgmt_constants.KEY_ACTION: mgmt_constants.ACTION_CREATE_VNF,
+            mgmt_constants.KEY_KWARGS: {'vnf': vnf_dict},
+        }
+        new_status = constants.ACTIVE
+        try:
+            self.mgmt_call(context, vnf_dict, kwargs)
+        except exceptions.MgmtDriverException:
+            LOG.error('VNF configuration failed')
+            new_status = constants.ERROR
+            self.set_vnf_error_status_reason(context, vnf_id,
+                                             'Unable to configure VDU')
+        vnf_dict['status'] = new_status
+        self._create_vnf_status(context, vnf_id, new_status)
+
+    def get_vim(self, context, vnf):
+        region_name = vnf.setdefault('placement_attr', {}).get(
+            'region_name', None)
+        vim_res = self.vim_client.get_vim(context, vnf['vim_id'],
+                                          region_name)
+        vnf['placement_attr']['vim_name'] = vim_res['vim_name']
+        vnf['vim_id'] = vim_res['vim_id']
+        return vim_res
+
+    def _create_vnf(self, context, vnf, vim_auth, driver_name):
+        vnf_dict = self._create_vnf_pre(
+            context, vnf) if not vnf.get('id') else vnf
+        vnf_id = vnf_dict['id']
+        LOG.debug('vnf_dict %s', vnf_dict)
+        if driver_name == 'openstack':
+            self.mgmt_create_pre(context, vnf_dict)
+            self.add_alarm_url_to_vnf(context, vnf_dict)
+
+        try:
+            instance_id = self._vnf_manager.invoke(
+                driver_name, 'create', plugin=self,
+                context=context, vnf=vnf_dict, auth_attr=vim_auth)
+        except Exception:
+            LOG.debug('Fail to create vnf %s in infra_driver, '
+                      'so delete this vnf',
+                      vnf_dict['id'])
+            with excutils.save_and_reraise_exception():
+                self.delete_vnf(context, vnf_id)
+
+        vnf_dict['instance_id'] = instance_id
+        return vnf_dict
+
+    def create_vnf(self, context, vnf):
+        vnf_info = vnf['vnf']
+        name = vnf_info['name']
+
+        # if vnfd_template specified, create vnfd from template
+        # create template dictionary structure same as needed in create_vnfd()
+        if vnf_info.get('vnfd_template'):
+            vnfd_name = utils.generate_resource_name(name, 'inline')
+            vnfd = {'vnfd': {'attributes': {'vnfd': vnf_info['vnfd_template']},
+                             'name': vnfd_name,
+                             'template_source': 'inline',
+                             'service_types': [{'service_type': 'vnfd'}]}}
+            vnf_info['vnfd_id'] = self.create_vnfd(context, vnfd).get('id')
+
+        infra_driver, vim_auth = self._get_infra_driver(context, vnf_info)
+        if infra_driver not in self._vnf_manager:
+            LOG.debug('unknown vim driver '
+                      '%(infra_driver)s in %(drivers)s',
+                      {'infra_driver': infra_driver,
+                       'drivers': cfg.CONF.tacker.infra_driver})
+            raise vnfm.InvalidInfraDriver(vim_name=infra_driver)
+
+        vnf_attributes = vnf_info['attributes']
+        if vnf_attributes.get('param_values'):
+            param = vnf_attributes['param_values']
+            if isinstance(param, dict):
+                # TODO(sripriya) remove this yaml dump once db supports storing
+                # json format of yaml files in a separate column instead of
+                #  key value string pairs in vnf attributes table
+                vnf_attributes['param_values'] = yaml.safe_dump(param)
+            else:
+                raise vnfm.InvalidAPIAttributeType(atype=type(param))
+        if vnf_attributes.get('config'):
+            config = vnf_attributes['config']
+            if isinstance(config, dict):
+                # TODO(sripriya) remove this yaml dump once db supports storing
+                # json format of yaml files in a separate column instead of
+                #  key value string pairs in vnf attributes table
+                vnf_attributes['config'] = yaml.safe_dump(config)
+            else:
+                raise vnfm.InvalidAPIAttributeType(atype=type(config))
+
+        vnf_dict = self._create_vnf(context, vnf_info, vim_auth, infra_driver)
+
+        def create_vnf_wait():
+            self._create_vnf_wait(context, vnf_dict, vim_auth, infra_driver)
+
+            if 'app_monitoring_policy' in vnf_dict['attributes']:
+                self.add_vnf_to_appmonitor(context, vnf_dict)
+
+            if vnf_dict['status'] is not constants.ERROR:
+                self.add_vnf_to_monitor(context, vnf_dict)
+            self.config_vnf(context, vnf_dict)
+        self.spawn_n(create_vnf_wait)
+        return vnf_dict
+
