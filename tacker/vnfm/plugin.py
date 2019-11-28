@@ -881,3 +881,46 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
         pl_action_dict['policy_actions']['def_actions'] = list()
         pl_action_dict['policy_actions']['custom_actions'] = dict()
         for action in action_list:
+            # validate policy action. if action is composite, split it.
+            # ex: SP1-in, SP1-out
+            action_ = None
+            if action in constants.DEFAULT_ALARM_ACTIONS:
+                pl_action_dict['policy_actions']['def_actions'].append(action)
+            policy_ = self.get_vnf_policy(context, action, vnf_id)
+            if not policy_:
+                sp_action = action.split('-')
+                if len(sp_action) == 2:
+                    bk_policy_name = sp_action[0]
+                    bk_policy_action = sp_action[1]
+                    policies_ = self.get_vnf_policies(
+                        context, vnf_id, filters={'name': bk_policy_name})
+                    if policies_:
+                        policy_ = policies_[0]
+                        action_ = bk_policy_action
+            if policy_:
+                pl_action_dict['policy_actions']['custom_actions'].update(
+                    {policy_['id']: {'bckend_policy': policy_,
+                                   'bckend_action': action_}})
+
+            LOG.debug("Trigger %s is validated successfully", trigger)
+
+        return pl_action_dict
+        # validate url
+
+    def _get_vnf_triggers(self, context, vnf_id, filters=None, fields=None):
+        if filters.get('name') in constants.RESERVATION_POLICY_ACTIONS:
+            policy = self.get_vnf_policy_by_type(
+                context, vnf_id, policy_type=constants.POLICY_RESERVATION)
+        else:
+            policy = self.get_vnf_policy_by_type(
+                context, vnf_id, policy_type=constants.POLICY_ALARMING)
+        triggers = policy['properties']
+        vnf_trigger = dict()
+        for trigger_name, trigger_dict in triggers.items():
+            if trigger_name == filters.get('name'):
+                vnf_trigger['trigger'] = {trigger_name: trigger_dict}
+                vnf_trigger['vnf'] = policy['vnf']
+                break
+
+        return vnf_trigger
+
