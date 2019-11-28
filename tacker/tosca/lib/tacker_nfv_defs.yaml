@@ -376,3 +376,11 @@ node_types:
       image:
         type: string
         required: false
+
+  tosca.nodes.BlockStorageAttachment:
+    derived_from: tosca.nodes.Root
+    properties:
+      location:
+        type: string
+        required: true
+
