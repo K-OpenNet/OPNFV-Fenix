@@ -44,3 +44,21 @@ LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
 
 
+
+def config_opts():
+    return [('tacker', VNFMMgmtMixin.OPTS),
+            ('tacker', VNFMPlugin.OPTS_INFRA_DRIVER),
+            ('tacker', VNFMPlugin.OPTS_POLICY_ACTION)]
+
+
+class VNFMMgmtMixin(object):
+    OPTS = [
+        cfg.ListOpt(
+            'mgmt_driver', default=['noop', 'openwrt'],
+            help=_('MGMT driver to communicate with '
+                   'Hosting VNF/logical service '
+                   'instance tacker plugin will use')),
+        cfg.IntOpt('boot_wait', default=30,
+            help=_('Time interval to wait for VM to boot'))
+    ]
+    cfg.CONF.register_opts(OPTS, 'tacker')
