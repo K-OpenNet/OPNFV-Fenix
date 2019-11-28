@@ -133,3 +133,29 @@ class VNFMonitor(object):
         vnfm_utils.log_events(t_context.get_admin_context(),
                               new_vnf['vnf'],
                               constants.RES_EVT_MONITOR, evt_details)
+
+
+    def delete_hosting_vnf(self, vnf_id):
+        LOG.debug('deleting vnf_id %(vnf_id)s', {'vnf_id': vnf_id})
+        with self._lock:
+            hosting_vnf = VNFMonitor._hosting_vnfs.pop(vnf_id, None)
+            if hosting_vnf:
+                LOG.debug('deleting vnf_id %(vnf_id)s, Mgmt IP %(ips)s',
+                          {'vnf_id': vnf_id,
+                           'ips': hosting_vnf['mgmt_ip_addresses']})
+
+    def update_hosting_vnf(self, updated_vnf_dict, evt_details=None):
+        with self._lock:
+            vnf_to_update = VNFMonitor._hosting_vnfs.get(
+                updated_vnf_dict.get('id'))
+            if vnf_to_update:
+                updated_vnf = copy.deepcopy(updated_vnf_dict)
+                vnf_to_update['vnf'] = updated_vnf
+                vnf_to_update['mgmt_ip_addresses'] = jsonutils.loads(
+                    updated_vnf_dict['mgmt_ip_address'])
+
+                if evt_details is not None:
+                    vnfm_utils.log_events(t_context.get_admin_context(),
+                                          vnf_to_update['vnf'],
+                                          constants.RES_EVT_HEAL,
+                                          evt_details=evt_details)
