@@ -882,3 +882,46 @@ def get_sub_heat_tmpl_name(template):
             sub_heat_tmpl_name = policy.name + '_' + \
                 uuidutils.generate_uuid() + '_res.yaml'
             return sub_heat_tmpl_name
+
+
+
+def update_nested_scaling_resources(nested_resources, mgmt_ports, metadata,
+                                    res_tpl, unsupported_res_prop=None):
+    nested_tpl = dict()
+    if nested_resources:
+        nested_resource_name, nested_resources_yaml =\
+            list(nested_resources.items())[0]
+        nested_resources_dict =\
+            yamlparser.simple_ordered_parse(nested_resources_yaml)
+        if metadata.get('vdus'):
+            for vdu_name, metadata_dict in metadata['vdus'].items():
+                if nested_resources_dict['resources'].get(vdu_name):
+                    nested_resources_dict['resources'][vdu_name]['properties']['metadata'] = \
+                        metadata_dict
+        add_resources_tpl(nested_resources_dict, res_tpl)
+        for res in nested_resources_dict["resources"].values():
+            if not res['type'] == HEAT_SOFTWARE_CONFIG:
+                continue
+            config = res["properties"]["config"]
+            if 'get_file' in config:
+                res["properties"]["config"] = open(config["get_file"]).read()
+
+        if unsupported_res_prop:
+            convert_unsupported_res_prop(nested_resources_dict,
+                                         unsupported_res_prop)
+
+        for outputname, portname in mgmt_ports.items():
+            ipval = {'get_attr': [portname, 'fixed_ips', 0, 'ip_address']}
+            output = {outputname: {'value': ipval}}
+            if 'outputs' in nested_resources_dict:
+                nested_resources_dict['outputs'].update(output)
+            else:
+                nested_resources_dict['outputs'] = output
+            LOG.debug(_('Added output for %s'), outputname)
+            yaml.SafeDumper.add_representer(
+                OrderedDict, lambda dumper, value: represent_odict(
+                    dumper, u'tag:yaml.org,2002:map', value))
+            nested_tpl[nested_resource_name] =\
+                yaml.safe_dump(nested_resources_dict)
+    return nested_tpl
+
