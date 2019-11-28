@@ -88,3 +88,36 @@ class TOSCAToHOT(object):
         if self.appmonitoring_dict:
             self.vnf['attributes']['app_monitoring_policy'] = \
                 jsonutils.dump_as_bytes(self.appmonitoring_dict)
+
+    @log.log
+    def _get_vnfd(self):
+        self.attributes = self.vnf['vnfd']['attributes'].copy()
+        self.vnfd_yaml = self.attributes.pop('vnfd', None)
+        if self.vnfd_yaml is None:
+            LOG.error("VNFD is not provided, so no vnf is created !!")
+            raise exceptions.InvalidInput("VNFD template is None.")
+        LOG.debug('vnfd_yaml %s', self.vnfd_yaml)
+
+    @log.log
+    def _update_fields(self):
+        attributes = self.attributes
+        fields = dict((key, attributes.pop(key)) for key
+                      in ('stack_name', 'template_url', 'template')
+                      if key in attributes)
+        for key in ('files', 'parameters'):
+            if key in attributes:
+                fields[key] = jsonutils.loads(attributes.pop(key))
+
+        # overwrite parameters with given dev_attrs for vnf creation
+        dev_attrs = self.vnf['attributes'].copy()
+        fields.update(dict((key, dev_attrs.pop(key)) for key
+                      in ('stack_name', 'template_url', 'template')
+                      if key in dev_attrs))
+        for key in ('files', 'parameters'):
+            if key in dev_attrs:
+                fields.setdefault(key, {}).update(
+                    jsonutils.loads(dev_attrs.pop(key)))
+
+        self.attributes = attributes
+        self.fields = fields
+        return dev_attrs
