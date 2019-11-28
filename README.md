@@ -20,3 +20,7 @@ Maintenance procedure can be divided into two cases.
 2. VNF is impacted due to the infrastructure (host) maintenance or upgrade. Upgrading the VNF is also possible at the same.
 
 In the case of first, Tacker follows default procedure of Fenix and supports preparation procedure for Host Maintenance such as scaling down VNF and migrating instances to another host to have an empty host for infrastructure rolling maintenance or upgrade.
+
+#### Working Items
+1. TOSCA Template definition for Maintenance
+
