@@ -150,3 +150,31 @@ class VNFMPlugin(vnfm_db.VNFMPluginDb, VNFMMgmtMixin):
         self._vnf_maintenance_monitor = monitor.VNFMaintenanceAlarmMonitor()
         self._vnf_app_monitor = monitor.VNFAppMonitor()
         self._init_monitoring()
+nit_monitoring(self):
+        context = t_context.get_admin_context()
+        vnfs = self.get_vnfs(context)
+        for vnf in vnfs:
+            # Add tenant_id in context object as it is required
+            # to get VIM in monitoring.
+            context.tenant_id = vnf['tenant_id']
+            self.add_vnf_to_monitor(context, vnf)
+
+    def spawn_n(self, function, *args, **kwargs):
+        self._pool.spawn_n(function, *args, **kwargs)
+
+    def create_vnfd(self, context, vnfd):
+        vnfd_data = vnfd['vnfd']
+        template = vnfd_data['attributes'].get('vnfd')
+        if isinstance(template, dict):
+            # TODO(sripriya) remove this yaml dump once db supports storing
+            # json format of yaml files in a separate column instead of
+            # key value string pairs in vnf attributes table
+            vnfd_data['attributes']['vnfd'] = yaml.safe_dump(
+                template)
+        else:
+            raise vnfm.InvalidAPIAttributeType(atype=type(template))
+        if "tosca_definitions_version" not in template:
+            raise exceptions.Invalid('Not a valid template: '
+                                     'tosca_definitions_version is missing.')
+
+        LOG.debug('vnfd %s', vnfd_data)
