@@ -178,3 +178,28 @@ nit_monitoring(self):
                                      'tosca_definitions_version is missing.')
 
         LOG.debug('vnfd %s', vnfd_data)
+
+        service_types = vnfd_data.get('service_types')
+        if not attributes.is_attr_set(service_types):
+            LOG.debug('service type must be specified')
+            raise vnfm.ServiceTypesNotSpecified()
+        for service_type in service_types:
+            # TODO(yamahata):
+            # framework doesn't know what services are valid for now.
+            # so doesn't check it here yet.
+            pass
+        if 'template_source' in vnfd_data:
+            template_source = vnfd_data.get('template_source')
+        else:
+            template_source = 'onboarded'
+        vnfd['vnfd']['template_source'] = template_source
+
+        self._parse_template_input(vnfd)
+        return super(VNFMPlugin, self).create_vnfd(
+            context, vnfd)
+
+    def _parse_template_input(self, vnfd):
+        vnfd_dict = vnfd['vnfd']
+        vnfd_yaml = vnfd_dict['attributes'].get('vnfd')
+        if vnfd_yaml is None:
+            return
