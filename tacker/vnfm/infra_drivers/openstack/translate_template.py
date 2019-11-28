@@ -207,3 +207,32 @@ class TOSCAToHOT(object):
             }
         port_dict['properties'].setdefault('fixed_ips', [])
         return port_dict
+
+    @log.log
+    def _make_mgmt_outputs_dict(self, vdu_id, port, template_dict):
+        mgmt_ip = 'mgmt_ip-%s' % vdu_id
+        outputs_dict = template_dict['outputs']
+        outputs_dict[mgmt_ip] = {
+            'description': 'management ip address',
+            'value': {
+                'get_attr': [port, 'fixed_ips', 0, 'ip_address']
+            }
+        }
+        template_dict['outputs'] = outputs_dict
+        return template_dict
+
+    @log.log
+    def _handle_port_creation(self, vdu_id, network_param,
+                              template_dict, ip_list=None,
+                              mgmt_flag=False):
+        ip_list = ip_list or []
+        port = '%s-%s-port' % (vdu_id, network_param['network'])
+        port_dict = self._make_port_dict()
+        if mgmt_flag:
+            template_dict = self._make_mgmt_outputs_dict(vdu_id, port,
+                                                         template_dict)
+        for ip in ip_list:
+            port_dict['properties']['fixed_ips'].append({"ip_address": ip})
+        port_dict['properties'].update(network_param)
+        template_dict['resources'][port] = port_dict
+        return port, template_dict
