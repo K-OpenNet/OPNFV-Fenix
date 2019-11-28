@@ -56,3 +56,115 @@ OS_RESOURCES = {
                 "disk_size": ("disk", 1, "GB"),
                     "mem_size": ("ram", 512, "MB")
                     }
+
+
+CPU_PROP_MAP = (('hw:cpu_policy', 'cpu_affinity'),
+                ('hw:cpu_threads_policy', 'thread_allocation'),
+                ('hw:cpu_sockets', 'socket_count'),
+                ('hw:cpu_threads', 'thread_count'),
+                ('hw:cpu_cores', 'core_count'))
+
+CPU_PROP_VAL_MAP = {'cpu_affinity': ('shared', 'dedicated')}
+
+CPU_PROP_KEY_SET = {'cpu_affinity', 'thread_allocation', 'socket_count',
+                    'thread_count', 'core_count'}
+
+FLAVOR_EXTRA_SPECS_LIST = ('cpu_allocation',
+                           'mem_page_size',
+                           'numa_node_count',
+                           'numa_nodes')
+
+delpropmap = {TACKERVDU: ('mgmt_driver', 'config', 'service_type',
+                          'placement_policy', 'monitoring_policy',
+                          'metadata', 'failure_policy'),
+              TACKERCP: ('management',)}
+
+convert_prop = {TACKERCP: {'anti_spoofing_protection':
+                           'port_security_enabled',
+                           'type':
+                           'binding:vnic_type'}}
+
+convert_prop_values = {TACKERCP: {'type': {'sriov': 'direct',
+                                           'vnic': 'normal'}}}
+
+deletenodes = (MONITORING, FAILURE, PLACEMENT)
+
+HEAT_RESOURCE_MAP = {
+    "flavor": "OS::Nova::Flavor",
+    "image": "OS::Glance::WebImage",
+    "maintenance": "OS::Aodh::EventAlarm"
+}
+
+SCALE_GROUP_RESOURCE = "OS::Heat::AutoScalingGroup"
+SCALE_POLICY_RESOURCE = "OS::Heat::ScalingPolicy"
+
+
+@log.log
+def updateimports(template):
+    path = os.path.dirname(os.path.abspath(__file__)) + '/lib/'
+    defsfile = path + 'tacker_defs.yaml'
+
+    if 'imports' in template:
+        template['imports'].append(defsfile)
+    else:
+        template['imports'] = [defsfile]
+
+    if 'nfv' in template['tosca_definitions_version']:
+        nfvfile = path + 'tacker_nfv_defs.yaml'
+
+        template['imports'].append(nfvfile)
+
+    LOG.debug(path)
+
+
+@log.log
+def check_for_substitution_mappings(template, params):
+    sm_dict = params.get('substitution_mappings', {})
+    requirements = sm_dict.get('requirements')
+    node_tpl = template['topology_template']['node_templates']
+    req_dict_tpl = template['topology_template']['substitution_mappings'].get(
+        'requirements')
+    # Check if substitution_mappings and requirements are empty in params but
+    # not in template. If True raise exception
+    if (not sm_dict or not requirements) and req_dict_tpl:
+        raise vnfm.InvalidParamsForSM()
+    # Check if requirements are present for SM in template, if True then return
+    elif (not sm_dict or not requirements) and not req_dict_tpl:
+        return
+    del params['substitution_mappings']
+    for req_name, req_val in (req_dict_tpl).items():
+        if req_name not in requirements:
+            raise vnfm.SMRequirementMissing(requirement=req_name)
+        if not isinstance(req_val, list):
+            raise vnfm.InvalidSubstitutionMapping(requirement=req_name)
+        try:
+            node_name = req_val[0]
+            node_req = req_val[1]
+
+            node_tpl[node_name]['requirements'].append({
+                node_req: {
+                    'node': requirements[req_name]
+                }
+            })
+            node_tpl[requirements[req_name]] = \
+                sm_dict[requirements[req_name]]
+        except Exception:
+            raise vnfm.InvalidSubstitutionMapping(requirement=req_name)
+
+
+@log.log
+def get_vdu_monitoring(template):
+    monitoring_dict = dict()
+    policy_dict = dict()
+    policy_dict['vdus'] = collections.OrderedDict()
+    for nt in template.nodetemplates:
+        if nt.type_definition.is_derived_from(TACKERVDU):
+            mon_policy = nt.get_property_value('monitoring_policy') or 'noop'
+            if mon_policy != 'noop':
+                if 'parameters' in mon_policy:
+                    mon_policy['monitoring_params'] = mon_policy['parameters']
+                policy_dict['vdus'][nt.name] = {}
+                policy_dict['vdus'][nt.name][mon_policy['name']] = mon_policy
+    if policy_dict.get('vdus'):
+        monitoring_dict = policy_dict
+    return monitoring_dict
