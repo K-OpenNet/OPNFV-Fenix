@@ -121,3 +121,29 @@ class TOSCAToHOT(object):
         self.attributes = attributes
         self.fields = fields
         return dev_attrs
+
+
+    @log.log
+    def _update_params(self, original, paramvalues, match=False):
+        for key, value in (original).items():
+            if not isinstance(value, dict) or 'get_input' not in str(value):
+                pass
+            elif isinstance(value, dict):
+                if not match:
+                    if key in paramvalues and 'param' in paramvalues[key]:
+                        self._update_params(value, paramvalues[key]['param'],
+                                            True)
+                    elif key in paramvalues:
+                        self._update_params(value, paramvalues[key], False)
+                    else:
+                        LOG.debug('Key missing Value: %s', key)
+                        raise cs.InputValuesMissing(key=key)
+                elif 'get_input' in value:
+                    if value['get_input'] in paramvalues:
+                        original[key] = paramvalues[value['get_input']]
+                    else:
+                        LOG.debug('Key missing Value: %s', key)
+                        raise cs.InputValuesMissing(key=key)
+                else:
+                    self._update_params(value, paramvalues, True)
+
