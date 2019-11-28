@@ -62,3 +62,37 @@ class VNFMMgmtMixin(object):
             help=_('Time interval to wait for VM to boot'))
     ]
     cfg.CONF.register_opts(OPTS, 'tacker')
+
+    def __init__(self):
+        super(VNFMMgmtMixin, self).__init__()
+        self._mgmt_manager = driver_manager.DriverManager(
+            'tacker.tacker.mgmt.drivers', cfg.CONF.tacker.mgmt_driver)
+
+    def _invoke(self, vnf_dict, **kwargs):
+        method = inspect.stack()[1][3]
+        return self._mgmt_manager.invoke(
+            self._mgmt_driver_name(vnf_dict), method, **kwargs)
+
+    def mgmt_create_pre(self, context, vnf_dict):
+        return self._invoke(
+            vnf_dict, plugin=self, context=context, vnf=vnf_dict)
+
+    def mgmt_create_post(self, context, vnf_dict):
+        return self._invoke(
+            vnf_dict, plugin=self, context=context, vnf=vnf_dict)
+
+    def mgmt_update_pre(self, context, vnf_dict):
+        return self._invoke(
+            vnf_dict, plugin=self, context=context, vnf=vnf_dict)
+
+    def mgmt_update_post(self, context, vnf_dict):
+        return self._invoke(
+            vnf_dict, plugin=self, context=context, vnf=vnf_dict)
+
+    def mgmt_delete_pre(self, context, vnf_dict):
+        return self._invoke(
+            vnf_dict, plugin=self, context=context, vnf=vnf_dict)
+
+    def mgmt_delete_post(self, context, vnf_dict):
+        return self._invoke(
+            vnf_dict, plugin=self, context=context, vnf=vnf_dict)
