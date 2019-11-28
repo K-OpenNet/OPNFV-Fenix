@@ -691,3 +691,54 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
 
             return status
 
+        # pre
+        def _handle_vnf_scaling_pre():
+            status = _get_status()
+            result = self._update_vnf_scaling_status(context,
+                                                     policy,
+                                                     [constants.ACTIVE],
+                                                     status)
+            LOG.debug("Policy %(policy)s vnf is at %(status)s",
+                      {'policy': policy['name'],
+                       'status': status})
+            return result
+
+        # post
+        def _handle_vnf_scaling_post(new_status, mgmt_ip_address=None):
+            status = _get_status()
+            result = self._update_vnf_scaling_status(context,
+                                                     policy,
+                                                     [status],
+                                                     new_status,
+                                                     mgmt_ip_address)
+            LOG.debug("Policy %(policy)s vnf is at %(status)s",
+                      {'policy': policy['name'],
+                       'status': new_status})
+            return result
+
+        # action
+        def _vnf_policy_action():
+            try:
+                last_event_id = self._vnf_manager.invoke(
+                    infra_driver,
+                    'scale',
+                    plugin=self,
+                    context=context,
+                    auth_attr=vim_auth,
+                    policy=policy,
+                    region_name=region_name
+                )
+                LOG.debug("Policy %s action is started successfully",
+                          policy['name'])
+                return last_event_id
+            except Exception as e:
+                LOG.error("Policy %s action is failed to start",
+                          policy)
+                with excutils.save_and_reraise_exception():
+                    vnf['status'] = constants.ERROR
+                    self.set_vnf_error_status_reason(
+                        context,
+                        policy['vnf']['id'],
+                        six.text_type(e))
+                    _handle_vnf_scaling_post(constants.ERROR)
+
