@@ -260,3 +260,70 @@ class VNFAppMonitor(object):
         driver = applicationvnfdict['vdus'][vdunode[0]]['name']
         kwargs = applicationvnfdict
         return self._invoke(driver, vnf=vnf_dict, kwargs=kwargs)
+
+
+
+class VNFAlarmMonitor(object):
+    """VNF Alarm monitor"""
+    OPTS = [
+        cfg.ListOpt(
+            'alarm_monitor_driver', default=['ceilometer'],
+            help=_('Alarm monitoring driver to communicate with '
+                   'Hosting VNF/logical service '
+                   'instance tacker plugin will use')),
+    ]
+    cfg.CONF.register_opts(OPTS, 'tacker')
+
+    # get alarm here
+    def __init__(self):
+        self._alarm_monitor_manager = driver_manager.DriverManager(
+            'tacker.tacker.alarm_monitor.drivers',
+            cfg.CONF.tacker.alarm_monitor_driver)
+
+    def update_vnf_with_alarm(self, plugin, context, vnf, policy_dict):
+        triggers = policy_dict['triggers']
+        alarm_url = dict()
+        for trigger_name, trigger_dict in triggers.items():
+            params = dict()
+            params['vnf_id'] = vnf['id']
+            params['mon_policy_name'] = trigger_name
+            driver = trigger_dict['event_type']['implementation']
+            # TODO(Tung Doan) trigger_dict.get('actions') needs to be used
+            policy_action = trigger_dict.get('action')
+            if len(policy_action) == 0:
+                vnfm_utils.log_events(t_context.get_admin_context(), vnf,
+                                      constants.RES_EVT_MONITOR,
+                                      "Alarm not set: policy action missing")
+                return
+            # Other backend policies with the construct (policy, action)
+            # ex: (SP1, in), (SP1, out)
+
+            def _refactor_backend_policy(bk_policy_name, bk_action_name):
+                policy = '%(policy_name)s-%(action_name)s' % {
+                    'policy_name': bk_policy_name,
+                    'action_name': bk_action_name}
+                return policy
+
+            for index, policy_action_name in enumerate(policy_action):
+                filters = {'name': policy_action_name}
+                bkend_policies =\
+                    plugin.get_vnf_policies(context, vnf['id'], filters)
+                if bkend_policies:
+                    bkend_policy = bkend_policies[0]
+                    if bkend_policy['type'] == constants.POLICY_SCALING:
+                        cp = trigger_dict['condition'].\
+                            get('comparison_operator')
+                        scaling_type = 'out' if cp == 'gt' else 'in'
+                        policy_action[index] = _refactor_backend_policy(
+                            policy_action_name, scaling_type)
+
+            # Support multiple action. Ex: respawn % notify
+            action_name = '%'.join(policy_action)
+
+            params['mon_policy_action'] = action_name
+            alarm_url[trigger_name] =\
+                self.call_alarm_url(driver, vnf, params)
+            details = "Alarm URL set successfully: %s" % alarm_url
+            vnfm_utils.log_events(t_context.get_admin_context(), vnf,
+                                  constants.RES_EVT_MONITOR, details)
+        return alarm_url
