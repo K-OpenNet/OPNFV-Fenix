@@ -844,3 +844,41 @@ def get_resources_for_maintenance(template, res_dict):
         res_dict["maintenance"][vdu_name] = {}
 
     return res_dict
+
+
+
+@log.log
+def get_scaling_policy(template):
+    scaling_policy_names = list()
+    for policy in template.policies:
+        if (policy.type_definition.is_derived_from(SCALING)):
+            scaling_policy_names.append(policy.name)
+    return scaling_policy_names
+
+
+@log.log
+def get_scaling_group_dict(ht_template, scaling_policy_names):
+    scaling_group_dict = dict()
+    scaling_group_names = list()
+    heat_dict = yamlparser.simple_ordered_parse(ht_template)
+    for resource_name, resource_dict in heat_dict['resources'].items():
+        if resource_dict['type'] == SCALE_GROUP_RESOURCE:
+            scaling_group_names.append(resource_name)
+    if scaling_group_names:
+        scaling_group_dict[scaling_policy_names[0]] = scaling_group_names[0]
+    return scaling_group_dict
+
+
+def get_nested_resources_name(template):
+    for policy in template.policies:
+        if (policy.type_definition.is_derived_from(SCALING)):
+            nested_resource_name = policy.name + '_res.yaml'
+            return nested_resource_name
+
+
+def get_sub_heat_tmpl_name(template):
+    for policy in template.policies:
+        if (policy.type_definition.is_derived_from(SCALING)):
+            sub_heat_tmpl_name = policy.name + '_' + \
+                uuidutils.generate_uuid() + '_res.yaml'
+            return sub_heat_tmpl_name
