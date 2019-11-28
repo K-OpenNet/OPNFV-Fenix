@@ -104,3 +104,32 @@ class VNFMonitor(object):
                         LOG.exception("Unknown exception: Monitoring failed "
                                       "for VNF '%s' due to '%s' ",
                                       hosting_vnf['id'], ex)
+
+
+    @staticmethod
+    def to_hosting_vnf(vnf_dict, action_cb):
+        return {
+            'id': vnf_dict['id'],
+            'mgmt_ip_addresses': jsonutils.loads(
+                vnf_dict['mgmt_ip_address']),
+            'action_cb': action_cb,
+            'vnf': vnf_dict,
+            'monitoring_policy': jsonutils.loads(
+                vnf_dict['attributes']['monitoring_policy'])
+        }
+
+    def add_hosting_vnf(self, new_vnf):
+        LOG.debug('Adding host %(id)s, Mgmt IP %(ips)s',
+                  {'id': new_vnf['id'],
+                   'ips': new_vnf['mgmt_ip_addresses']})
+        new_vnf['boot_at'] = timeutils.utcnow()
+        with self._lock:
+            VNFMonitor._hosting_vnfs[new_vnf['id']] = new_vnf
+
+        attrib_dict = new_vnf['vnf']['attributes']
+        mon_policy_dict = attrib_dict['monitoring_policy']
+        evt_details = (("VNF added for monitoring. "
+                        "mon_policy_dict = %s,") % (mon_policy_dict))
+        vnfm_utils.log_events(t_context.get_admin_context(),
+                              new_vnf['vnf'],
+                              constants.RES_EVT_MONITOR, evt_details)
