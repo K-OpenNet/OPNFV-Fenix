@@ -252,4 +252,40 @@ nit_monitoring(self):
                 vnf_dict, action_cb)
             LOG.debug('hosting_vnf: %s', hosting_vnf)
             self._vnf_monitor.add_hosting_vnf(hosting_vnf)
+dd_alarm_url_to_vnf(self, context, vnf_dict):
+        vnfd_yaml = vnf_dict['vnfd']['attributes'].get('vnfd', '')
+        vnfd_dict = yaml.safe_load(vnfd_yaml)
 
+        if not (vnfd_dict and vnfd_dict.get('tosca_definitions_version')):
+            return
+        try:
+            toscautils.updateimports(vnfd_dict)
+            tosca_vnfd = ToscaTemplate(a_file=False,
+                                  yaml_dict_tpl=vnfd_dict)
+        except Exception as e:
+            LOG.exception("tosca-parser error: %s", str(e))
+            raise vnfm.ToscaParserFailed(error_msg_details=str(e))
+
+        polices = vnfd_dict['topology_template'].get('policies', [])
+        for policy_dict in polices:
+            name, policy = list(policy_dict.items())[0]
+            if policy['type'] in constants.POLICY_ALARMING:
+                alarm_url =\
+                    self._vnf_alarm_monitor.update_vnf_with_alarm(
+                        self, context, vnf_dict, policy)
+                vnf_dict['attributes']['alarming_policy'] = vnf_dict['id']
+                vnf_dict['attributes'].update(alarm_url)
+            elif policy['type'] in constants.POLICY_RESERVATION:
+                alarm_url = \
+                    self._vnf_reservation_monitor.update_vnf_with_reservation(
+                        self, context, vnf_dict, policy)
+                vnf_dict['attributes']['reservation_policy'] = vnf_dict['id']
+                vnf_dict['attributes'].update(alarm_url)
+
+        maintenance_vdus = toscautils.get_maintenance_vdus(tosca_vnfd)
+        if maintenance_vdus:
+            alarm_url = \
+                self._vnf_maintenance_monitor.update_vnf_with_maintenance(
+                    vnf_dict, maintenance_vdus)
+            vnf_dict['attributes']['maintenance_policy'] = vnf_dict['id']
+            vnf_dict['attributes'].update(alarm_url)
