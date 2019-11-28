@@ -25,4 +25,45 @@ from tacker.common import log
 from tacker.extensions import common_services as cs
 from tacker.extensions import vnfm
 from tacker.plugins.common import constants
-from tacker.tosca import utils as toscautils
+from tacker.tosca import utils as toscautil
+
+
+
+LOG = logging.getLogger(__name__)
+CONF = cfg.CONF
+
+OPTS = [
+    cfg.DictOpt('flavor_extra_specs',
+               default={},
+               help=_("Flavor Extra Specs")),
+]
+
+CONF.register_opts(OPTS, group='openstack_vim')
+
+HEAT_VERSION_INCOMPATIBILITY_MAP = {'OS::Neutron::Port': {
+    'port_security_enabled': 'value_specs', }, }
+
+HEAT_TEMPLATE_BASE = """
+heat_template_version: 2013-05-23
+"""
+
+ALARMING_POLICY = 'tosca.policies.tacker.Alarming'
+SCALING_POLICY = 'tosca.policies.tacker.Scaling'
+
+
+class TOSCAToHOT(object):
+    """Convert TOSCA template to HOT template."""
+
+    def __init__(self, vnf, heatclient):
+        self.vnf = vnf
+        self.heatclient = heatclient
+        self.attributes = {}
+        self.vnfd_yaml = None
+        self.unsupported_props = {}
+        self.heat_template_yaml = None
+        self.monitoring_dict = None
+        self.nested_resources = dict()
+        self.fields = None
+        self.STACK_FLAVOR_EXTRA = cfg.CONF.openstack_vim.flavor_extra_specs
+        self.appmonitoring_dict = None
+
