@@ -548,3 +548,38 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
                      driver_name)
         return vnf_dict
 
+    def heal_vnf(self, context, vnf_id, heal_request_data_obj):
+        vnf_dict = self._update_vnf_pre(context, vnf_id,
+                                        constants.PENDING_HEAL)
+        driver_name, vim_auth = self._get_infra_driver(context, vnf_dict)
+        # Update vnf status to 'PENDING_HEAL' so that monitoring can
+        # be paused.
+        evt_details = ("Starts heal vnf request for VNF '%s'. "
+                       "Reason to Heal VNF: '%s'" % (vnf_dict['id'],
+                       heal_request_data_obj.cause))
+        self._vnf_monitor.update_hosting_vnf(vnf_dict, evt_details)
+
+        try:
+            self.mgmt_update_pre(context, vnf_dict)
+            self._vnf_manager.invoke(
+                driver_name, 'heal_vdu', plugin=self,
+                context=context, vnf_dict=vnf_dict,
+                heal_request_data_obj=heal_request_data_obj)
+        except vnfm.VNFHealFailed as e:
+            with excutils.save_and_reraise_exception():
+                vnf_dict['status'] = constants.ERROR
+                self._vnf_monitor.delete_hosting_vnf(vnf_id)
+                self.set_vnf_error_status_reason(context,
+                                                 vnf_dict['id'],
+                                                 six.text_type(e))
+                self.mgmt_update_post(context, vnf_dict)
+                self._update_vnf_post(context, vnf_id,
+                                      constants.ERROR,
+                                      vnf_dict, constants.PENDING_HEAL,
+                                      constants.RES_EVT_HEAL)
+
+        self.spawn_n(self._update_vnf_wait, context, vnf_dict, vim_auth,
+                     driver_name, vnf_heal=True)
+
+        return vnf_dict
+
