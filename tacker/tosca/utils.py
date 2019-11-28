@@ -747,3 +747,59 @@ def get_flavor_dict(template, flavor_extra_input=None):
                 populate_flavor_extra_specs(es_dict, properties,
                                             flavor_extra_input)
     return flavor_dict
+
+
+
+def populate_flavor_extra_specs(es_dict, properties, flavor_extra_input):
+    if 'mem_page_size' in properties:
+        mval = properties['mem_page_size'].value
+        if str(mval).isdigit():
+            mval = mval * 1024
+        elif mval not in ('small', 'large', 'any'):
+            raise vnfm.HugePageSizeInvalidInput(
+                error_msg_details=(mval + ":Invalid Input"))
+        es_dict['hw:mem_page_size'] = mval
+    if 'numa_nodes' in properties and 'numa_node_count' in properties:
+        LOG.warning('Both numa_nodes and numa_node_count have been '
+                    'specified; numa_node definitions will be ignored and '
+                    'numa_node_count will be applied')
+    if 'numa_node_count' in properties:
+        es_dict['hw:numa_nodes'] = \
+            properties['numa_node_count'].value
+    if 'numa_nodes' in properties and 'numa_node_count' not in properties:
+        nodes_dict = dict(properties['numa_nodes'].value)
+        dval = list(nodes_dict.values())
+        ncount = 0
+        for ndict in dval:
+            invalid_input = set(ndict.keys()) - {'id', 'vcpus', 'mem_size'}
+            if invalid_input:
+                raise vnfm.NumaNodesInvalidKeys(
+                    error_msg_details=(', '.join(invalid_input)),
+                    valid_keys="id, vcpus and mem_size")
+            if 'id' in ndict and 'vcpus' in ndict:
+                vk = "hw:numa_cpus." + str(ndict['id'])
+                vval = ",".join([str(x) for x in ndict['vcpus']])
+                es_dict[vk] = vval
+            if 'id' in ndict and 'mem_size' in ndict:
+                mk = "hw:numa_mem." + str(ndict['id'])
+                es_dict[mk] = ndict['mem_size']
+            ncount += 1
+        es_dict['hw:numa_nodes'] = ncount
+    if 'cpu_allocation' in properties:
+        cpu_dict = dict(properties['cpu_allocation'].value)
+        invalid_input = set(cpu_dict.keys()) - CPU_PROP_KEY_SET
+        if invalid_input:
+            raise vnfm.CpuAllocationInvalidKeys(
+                error_msg_details=(', '.join(invalid_input)),
+                valid_keys=(', '.join(CPU_PROP_KEY_SET)))
+        for(k, v) in CPU_PROP_MAP:
+            if v not in cpu_dict:
+                continue
+            if CPU_PROP_VAL_MAP.get(v, None):
+                if cpu_dict[v] not in CPU_PROP_VAL_MAP[v]:
+                    raise vnfm.CpuAllocationInvalidValues(
+                        error_msg_details=cpu_dict[v],
+                        valid_values=CPU_PROP_VAL_MAP[v])
+            es_dict[k] = cpu_dict[v]
+    if flavor_extra_input:
+        es_dict.update(flavor_extra_input)
