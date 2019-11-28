@@ -653,3 +653,41 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
                     self.mgmt_delete_post(context, vnf_dict)
                     self._delete_vnf_post(context, vnf_dict, e)
 
+        if force_delete:
+            self._delete_vnf_force(context, vnf_dict['id'])
+            self.mgmt_delete_post(context, vnf_dict)
+            self._delete_vnf_post(context, vnf_dict, None, force_delete=True)
+        else:
+            self.spawn_n(self._delete_vnf_wait, context, vnf_dict, vim_auth,
+                         driver_name)
+
+    def _handle_vnf_scaling(self, context, policy):
+        # validate
+        def _validate_scaling_policy():
+            type = policy['type']
+
+            if type not in constants.POLICY_ACTIONS.keys():
+                raise exceptions.VnfPolicyTypeInvalid(
+                    type=type,
+                    valid_types=constants.POLICY_ACTIONS.keys(),
+                    policy=policy['name']
+                )
+            action = policy['action']
+
+            if action not in constants.POLICY_ACTIONS[type]:
+                raise exceptions.VnfPolicyActionInvalid(
+                    action=action,
+                    valid_actions=constants.POLICY_ACTIONS[type],
+                    policy=policy['name']
+                )
+
+            LOG.debug("Policy %s is validated successfully", policy['name'])
+
+        def _get_status():
+            if policy['action'] == constants.ACTION_SCALE_IN:
+                status = constants.PENDING_SCALE_IN
+            else:
+                status = constants.PENDING_SCALE_OUT
+
+            return status
+
