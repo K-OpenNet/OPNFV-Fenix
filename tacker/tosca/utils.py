@@ -504,3 +504,79 @@ def represent_odict(dump, tag, mapping, flow_style=None):
         else:
             node.flow_style = best_style
     return node
+
+
+
+@log.log
+def post_process_heat_template(heat_tpl, mgmt_ports, metadata,
+                               alarm_resources, res_tpl, vol_res={},
+                               unsupported_res_prop=None, unique_id=None):
+    #
+    # TODO(bobh) - remove when heat-translator can support literal strings.
+    #
+    def fix_user_data(user_data_string):
+        user_data_string = re.sub('user_data: #', 'user_data: |\n        #',
+                                  user_data_string, re.MULTILINE)
+        return re.sub('\n\n', '\n', user_data_string, re.MULTILINE)
+
+    heat_tpl = fix_user_data(heat_tpl)
+    #
+    # End temporary workaround for heat-translator
+    #
+    heat_dict = yamlparser.simple_ordered_parse(heat_tpl)
+    for outputname, portname in mgmt_ports.items():
+        ipval = {'get_attr': [portname, 'fixed_ips', 0, 'ip_address']}
+        output = {outputname: {'value': ipval}}
+        if 'outputs' in heat_dict:
+            heat_dict['outputs'].update(output)
+        else:
+            heat_dict['outputs'] = output
+        LOG.debug('Added output for %s', outputname)
+    if metadata.get('vdus'):
+        for vdu_name, metadata_dict in metadata['vdus'].items():
+            metadata_dict['metering.server_group'] = \
+                (metadata_dict['metering.server_group'] + '-' + unique_id)[:15]
+            if heat_dict['resources'].get(vdu_name):
+                heat_dict['resources'][vdu_name]['properties']['metadata'] =\
+                    metadata_dict
+    add_resources_tpl(heat_dict, res_tpl)
+
+    query_metadata = alarm_resources.get('query_metadata')
+    alarm_actions = alarm_resources.get('alarm_actions')
+    event_types = alarm_resources.get('event_types')
+    if query_metadata:
+        for trigger_name, matching_metadata_dict in query_metadata.items():
+            if heat_dict['resources'].get(trigger_name):
+                query_mtdata = dict()
+                query_mtdata['query'] = \
+                    query_metadata[trigger_name]
+                heat_dict['resources'][trigger_name][
+                    'properties'].update(query_mtdata)
+    if alarm_actions:
+        for trigger_name, alarm_actions_dict in alarm_actions.items():
+            if heat_dict['resources'].get(trigger_name):
+                heat_dict['resources'][trigger_name]['properties']. \
+                    update(alarm_actions_dict)
+
+    if event_types:
+        for trigger_name, event_type in event_types.items():
+            if heat_dict['resources'].get(trigger_name):
+                heat_dict['resources'][trigger_name]['properties'].update(
+                    event_type)
+
+    for res in heat_dict["resources"].values():
+        if not res['type'] == HEAT_SOFTWARE_CONFIG:
+            continue
+        config = res["properties"]["config"]
+        if 'get_file' in config:
+            res["properties"]["config"] = open(config["get_file"]).read()
+
+    if vol_res.get('volumes'):
+        add_volume_resources(heat_dict, vol_res)
+    if unsupported_res_prop:
+        convert_unsupported_res_prop(heat_dict, unsupported_res_prop)
+
+    yaml.SafeDumper.add_representer(OrderedDict,
+    lambda dumper, value: represent_odict(dumper,
+                                          u'tag:yaml.org,2002:map', value))
+    return yaml.safe_dump(heat_dict)
