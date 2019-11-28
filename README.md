@@ -16,4 +16,5 @@ When VNF is created using VNFD, VNF generates ‘Maintenance URL’ to register 
 
 Maintenance procedure can be divided into two cases.
 
-
+1. VNF is impacted due to the infrastructure (host) maintenance or upgrade and might need to scale down VNF during the operation. Upgrading the VNF is also possible at the same.
+2. VNF is impacted due to the infrastructure (host) maintenance or upgrade. Upgrading the VNF is also possible at the same.
