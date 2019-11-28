@@ -793,3 +793,42 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
         p['id'] = uuidutils.generate_uuid()
         return p
 
+    def get_vnf_policies(
+            self, context, vnf_id, filters=None, fields=None):
+        vnf = self.get_vnf(context, vnf_id)
+        vnfd_tmpl = yaml.safe_load(vnf['vnfd']['attributes']['vnfd'])
+        policy_list = []
+
+        polices = vnfd_tmpl['topology_template'].get('policies', [])
+        for policy_dict in polices:
+            for name, policy in policy_dict.items():
+                def _add(policy):
+                    p = self._make_policy_dict(vnf, name, policy)
+                    p['name'] = name
+                    policy_list.append(p)
+
+                # Check for filters
+                if filters.get('name') or filters.get('type'):
+                    if name == filters.get('name'):
+                        _add(policy)
+                        break
+                    elif policy['type'] == filters.get('type'):
+                        _add(policy)
+                        break
+                    else:
+                        continue
+
+                _add(policy)
+
+        return policy_list
+
+    def get_vnf_policy(
+            self, context, policy_id, vnf_id, fields=None):
+        policies = self.get_vnf_policies(context,
+                                         vnf_id,
+                                         filters={'name': policy_id})
+        if policies:
+            return policies[0]
+        else:
+            return None
+
