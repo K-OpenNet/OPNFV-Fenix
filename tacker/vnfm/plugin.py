@@ -832,3 +832,52 @@ dd_alarm_url_to_vnf(self, context, vnf_dict):
         else:
             return None
 
+    def create_vnf_scale(self, context, vnf_id, scale):
+        policy_ = self.get_vnf_policy(context,
+                                      scale['scale']['policy'],
+                                      vnf_id)
+        if not policy_:
+            raise exceptions.VnfPolicyNotFound(policy=scale['scale']['policy'],
+                                               vnf_id=vnf_id)
+        policy_.update({'action': scale['scale']['type']})
+        self._handle_vnf_scaling(context, policy_)
+
+        return scale['scale']
+
+    def get_vnf_policy_by_type(self, context, vnf_id, policy_type=None, fields=None):             # noqa
+        policies = self.get_vnf_policies(context,
+                                         vnf_id,
+                                         filters={'type': policy_type})
+        if policies:
+            return policies[0]
+
+        raise exceptions.VnfPolicyTypeInvalid(
+            type=policy_type, policy=None,
+            valid_types=constants.VALID_POLICY_TYPES)
+
+    def _validate_alarming_policy(self, context, vnf_id, trigger):
+        # validate alarm status
+
+        # Trigger will contain only one action in trigger['trigger'] as it
+        # filtered in _get_vnf_triggers().
+        # Getting action from trigger to decide which process_alarm_for_vnf
+        # method will be called.
+        if list(trigger['trigger'])[0]\
+                in constants.RESERVATION_POLICY_ACTIONS:
+            if not self._vnf_reservation_monitor.process_alarm_for_vnf(
+                    vnf_id, trigger):
+                raise exceptions.AlarmUrlInvalid(vnf_id=vnf_id)
+        else:
+            if not self._vnf_alarm_monitor.process_alarm_for_vnf(
+                    vnf_id, trigger):
+                raise exceptions.AlarmUrlInvalid(vnf_id=vnf_id)
+
+        # validate policy action. if action is composite, split it.
+        # ex: respawn%notify
+        action = trigger['action_name']
+        action_list = action.split('%')
+        pl_action_dict = dict()
+        pl_action_dict['policy_actions'] = dict()
+        pl_action_dict['policy_actions']['def_actions'] = list()
+        pl_action_dict['policy_actions']['custom_actions'] = dict()
+        for action in action_list:
