@@ -803,3 +803,44 @@ def populate_flavor_extra_specs(es_dict, properties, flavor_extra_input):
             es_dict[k] = cpu_dict[v]
     if flavor_extra_input:
         es_dict.update(flavor_extra_input)
+
+
+
+def get_image_dict(template):
+    image_dict = {}
+    vdus = findvdus(template)
+    for vdu in vdus:
+        if not vdu.entity_tpl.get("artifacts"):
+            continue
+        artifacts = vdu.entity_tpl["artifacts"]
+        for name, artifact in (artifacts).items():
+            if ('type' in artifact.keys() and
+               artifact["type"] == IMAGE):
+                if 'file' not in artifact.keys():
+                    raise vnfm.FilePathMissing()
+                image_dict[vdu.name] = {
+                    "location": artifact["file"],
+                    "container_format": "bare",
+                    "disk_format": "raw",
+                    "name": name
+                }
+    return image_dict
+
+
+def get_resources_dict(template, flavor_extra_input=None):
+    res_dict = dict()
+    for res, method in (OS_RESOURCES).items():
+        res_method = getattr(sys.modules[__name__], method)
+        if res is 'flavor':
+            res_dict[res] = res_method(template, flavor_extra_input)
+        else:
+            res_dict[res] = res_method(template)
+    return res_dict
+
+
+def get_resources_for_maintenance(template, res_dict):
+    res_dict['maintenance'] = dict()
+    for vdu_name in get_maintenance_vdus(template):
+        res_dict["maintenance"][vdu_name] = {}
+
+    return res_dict
